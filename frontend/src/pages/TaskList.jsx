@@ -14,11 +14,15 @@ import { formatDate, getDeadlineColorClass } from '../utils/dateUtils';
 import api from '../services/api';
 import { toast } from 'react-hot-toast';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { useAuth } from '../context/AuthContext';
 
 const TaskList = () => {
   const location = useLocation();
   const queryClient = useQueryClient();
   const { mode, isCS, isCA } = useWorkspace();
+  const { user } = useAuth();
+  const workRole = (user?.designation || user?.role || '').toLowerCase().replaceAll(' ', '_');
+  const isExecutive = ['executive', 'intern', 'staff'].includes(workRole);
   const [searchQuery, setSearchQuery] = useState('');
   
   const [selectedStatuses, setSelectedStatuses] = useState([]);
@@ -47,11 +51,13 @@ const TaskList = () => {
   const { data: companies } = useQuery({
     queryKey: ['companies', mode],
     queryFn: () => getCompanies({ client_type: mode }),
+    enabled: !isExecutive,
   });
 
   const { data: users } = useQuery({
     queryKey: ['users'],
     queryFn: getUsers,
+    enabled: !isExecutive,
   });
 
   const completeMutation = useCompleteTaskMutation();
@@ -132,13 +138,13 @@ const TaskList = () => {
     <div className="space-y-6 page-transition relative pb-20">
       {/* Page Header */}
       <div>
-        <h1 className="text-xl font-bold text-[#0F172A] tracking-tight">Compliance Obligations</h1>
-        <p className="text-xs text-[#64748B] mt-0.5">Filter, reassign, and finalize regulatory filings across all clients.</p>
+        <h1 className="text-xl font-bold text-[#0F172A] tracking-tight">{isExecutive ? 'My Tasks' : 'Compliance Obligations'}</h1>
+        <p className="text-xs text-[#64748B] mt-0.5">{isExecutive ? 'Review and complete the compliance work assigned to you.' : 'Filter, reassign, and finalize regulatory filings across all clients.'}</p>
       </div>
 
       {/* Advanced Filter Bar */}
       <div className="bg-white border border-[#E5E7EB] rounded-lg p-4 space-y-4 sticky top-14 z-20 shadow-sm">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div className={`grid grid-cols-1 gap-3 ${isExecutive ? 'md:grid-cols-2' : 'md:grid-cols-4'}`}>
           <div className="flex items-center bg-[#F8FAFC] border border-[#E5E7EB] rounded-md px-3 py-2 text-xs focus-within:border-[#2563EB] transition-colors">
             <Search className="w-4 h-4 text-[#64748B] mr-2 shrink-0" />
             <input
@@ -150,7 +156,7 @@ const TaskList = () => {
             />
           </div>
 
-          <div className="flex items-center bg-[#F8FAFC] border border-[#E5E7EB] rounded-md px-2 py-1">
+          {!isExecutive && <div className="flex items-center bg-[#F8FAFC] border border-[#E5E7EB] rounded-md px-2 py-1">
             <Building className="w-3.5 h-3.5 text-[#64748B] mr-2 shrink-0" />
             <select
               value={selectedCompanyId}
@@ -162,9 +168,9 @@ const TaskList = () => {
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
-          </div>
+          </div>}
 
-          <div className="flex items-center bg-[#F8FAFC] border border-[#E5E7EB] rounded-md px-2 py-1">
+          {!isExecutive && <div className="flex items-center bg-[#F8FAFC] border border-[#E5E7EB] rounded-md px-2 py-1">
             <User className="w-3.5 h-3.5 text-[#64748B] mr-2 shrink-0" />
             <select
               value={selectedAssigneeId}
@@ -176,7 +182,7 @@ const TaskList = () => {
                 <option key={u.id} value={u.id}>{u.full_name || u.email}</option>
               ))}
             </select>
-          </div>
+          </div>}
 
           <div className="flex items-center bg-[#F8FAFC] border border-[#E5E7EB] rounded-md px-2 py-1 space-x-1 min-w-0">
             <Calendar className="w-3.5 h-3.5 text-[#64748B] shrink-0" />
@@ -243,7 +249,7 @@ const TaskList = () => {
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="border-b border-[#E5E7EB] bg-[#F8FAFC] h-10">
-                <th className="p-4 w-10"></th>
+                {!isExecutive && <th className="p-4 w-10"></th>}
                 <th className="p-4 text-[#64748B] font-bold uppercase text-[10px] tracking-wider">Title</th>
                 <th className="p-4 text-[#64748B] font-bold uppercase text-[10px] tracking-wider">Company</th>
                 <th className="p-4 text-[#64748B] font-bold uppercase text-[10px] tracking-wider">Due Date</th>
@@ -266,14 +272,14 @@ const TaskList = () => {
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-[#E5E7EB] bg-[#F8FAFC] text-[10px] font-bold text-[#64748B] uppercase tracking-wider h-11">
-                  <th className="p-4 w-10">
+                  {!isExecutive && <th className="p-4 w-10">
                     <input
                       type="checkbox"
                       onChange={handleSelectAll}
                       checked={selectedTaskIds.length === filteredTasks.length && filteredTasks.length > 0}
                       className="rounded border-[#E5E7EB] text-[#2563EB]"
                     />
-                  </th>
+                  </th>}
                   <th className="p-4">Obligation Title</th>
                   <th className="p-4">Company</th>
                   <th className="p-4">Due Date</th>
@@ -285,7 +291,7 @@ const TaskList = () => {
                 {filteredTasks.map((task) => {
                   const isChecked = selectedTaskIds.includes(task.id);
                   const deadlineColor = getDeadlineColorClass(task.due_date, task.status === 'closed');
-                  const assigned = users?.find((u) => u.id === task.assigned_to);
+                  const assigned = users?.find((u) => u.id === task.assigned_to) || task.assigned_user;
 
                   return (
                     <tr
@@ -295,14 +301,14 @@ const TaskList = () => {
                         isChecked ? 'bg-[#EFF6FF]' : ''
                       }`}
                     >
-                      <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                      {!isExecutive && <td className="p-4" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={isChecked}
                           onChange={(e) => handleSelectTask(e, task.id)}
                           className="rounded border-[#E5E7EB] text-[#2563EB]"
                         />
-                      </td>
+                      </td>}
                       <td className="p-4 font-semibold text-[#0F172A] group-hover:text-[#2563EB] transition-colors max-w-xs truncate">
                         {task.title}
                       </td>
@@ -328,7 +334,7 @@ const TaskList = () => {
       )}
 
       {/* Floating Bulk Action Bar */}
-      {selectedTaskIds.length > 0 && (
+      {!isExecutive && selectedTaskIds.length > 0 && (
         <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white border border-[#E5E7EB] px-6 py-3.5 rounded-full shadow-2xl shadow-[#0F172A]/15 z-30 flex items-center gap-6 text-xs page-transition">
           <span className="text-[#64748B] font-medium">
             <span className="text-[#0F172A] font-bold font-mono mr-1">{selectedTaskIds.length}</span>

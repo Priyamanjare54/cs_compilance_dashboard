@@ -22,6 +22,8 @@ class TaskReassignRequest(BaseModel):
 
 async def _task_for_user(task_id: uuid.UUID, user: User) -> Task:
     task = await require_same_organization(await Task.get(task_id), user)
+    if _work_role(user) in {"executive", "intern", "staff"} and task.assigned_to != user.id:
+        raise HTTPException(status_code=404, detail="Resource not found")
     # Partners receive only work already approved by the Team Lead (and its
     # terminal closed state). This applies to detail routes as well as lists.
     if _work_role(user) == "partner" and task.status not in {"approved", "closed"}:
@@ -141,15 +143,19 @@ async def get_tasks(
     current_user: User = Depends(get_current_user)
 ):
     query = {"organization_id": current_user.organization_id}
-    if _work_role(current_user) == "partner":
+    work_role = _work_role(current_user)
+    if work_role in {"executive", "intern", "staff"}:
+        # Executive dashboards must never expose another user's workload.
+        query["assigned_to"] = current_user.id
+    elif work_role == "partner":
         query["status"] = {"$in": ["approved", "closed"]}
-    if status is not None and _work_role(current_user) != "partner":
+    if status is not None and work_role != "partner":
         query["status"] = status
     if current_stage is not None:
         query["current_stage"] = current_stage
     if company_id is not None:
         query["company_id"] = company_id
-    if assigned_to is not None:
+    if assigned_to is not None and work_role not in {"executive", "intern", "staff"}:
         query["assigned_to"] = assigned_to
     if category is not None:
         query["category"] = category

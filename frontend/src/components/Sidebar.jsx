@@ -19,8 +19,13 @@ const Sidebar = () => {
     queryFn: async () => (await api.get('/organizations/current')).data,
     staleTime: 300000,
   });
+  const workRole = (user?.designation || user?.role || '').toLowerCase().replaceAll(' ', '_');
+  const isExecutive = ['executive', 'intern', 'staff'].includes(workRole);
 
-  const links = isCS ? [
+  const links = isExecutive ? [
+    { to: '/dashboard', label: 'Overview', icon: LayoutDashboard },
+    { to: '/tasks', label: 'My Tasks', icon: ListChecks },
+  ] : isCS ? [
     { to: '/dashboard', label: 'Overview', icon: LayoutDashboard },
     { to: '/clients', label: 'Companies', icon: Building2 },
     { to: '/tasks', label: 'Obligations', icon: ListChecks },
@@ -48,7 +53,6 @@ const Sidebar = () => {
     links.push({ to: '/reports', label: 'Reports', icon: BarChart3 });
     links.push({ to: '/organization', label: 'Firm settings', icon: UsersRound });
   }
-  const workRole = (user?.designation || user?.role || '').toLowerCase().replace(' ', '_');
   if (workRole === 'manager' || workRole === 'partner') links.splice(2, 0, { to: '/workload', label: 'Workload', icon: UsersRound });
 
   const initials = (user?.full_name || user?.email || 'CS')

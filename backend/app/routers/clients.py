@@ -19,7 +19,13 @@ import re
 router = APIRouter(prefix="/companies", tags=["companies"])
 clients_router = APIRouter(prefix="/clients", tags=["clients"])
 
+def _is_executive(user: User) -> bool:
+    return (user.designation or user.role or "").lower().replace(" ", "_") in {"executive", "intern", "staff"}
+
+
 async def _company_for_user(company_id: uuid.UUID, user: User) -> Company:
+    if _is_executive(user):
+        raise HTTPException(status_code=404, detail="Resource not found")
     return await require_same_organization(await Company.get(company_id), user)
 
 async def _tenant_user(user_id: uuid.UUID | None, organization_id: uuid.UUID) -> User | None:
@@ -181,6 +187,9 @@ async def get_companies(
     - **is_active**: Filter by active/inactive status.
     - **client_type**: Filter by CS or CA workspace mode.
     """
+    if _is_executive(current_user):
+        return []
+
     query = {"organization_id": current_user.organization_id}
     if assigned_to is not None:
         query["assigned_to"] = assigned_to
@@ -213,6 +222,8 @@ async def create_company(
     company_in: CompanyCreate,
     current_user: User = Depends(get_current_user)
 ):
+    if _is_executive(current_user):
+        raise HTTPException(status_code=403, detail="Executives cannot manage companies")
     if company_in.cin:
         existing = await Company.find_one({"cin": company_in.cin, "organization_id": current_user.organization_id})
         if existing:

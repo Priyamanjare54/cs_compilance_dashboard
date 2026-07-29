@@ -40,12 +40,53 @@ const Metric = ({ label, value, helper, icon: Icon, tone = 'blue' }) => {
   );
 };
 
+const ExecutiveTaskGroup = ({ title, helper, tasks, icon: Icon, tone, onOpen }) => {
+  const tones = {
+    blue: 'bg-blue-50 text-blue-600',
+    amber: 'bg-amber-50 text-amber-600',
+    red: 'bg-rose-50 text-rose-600',
+    green: 'bg-emerald-50 text-emerald-600',
+  };
+  return (
+    <section className="premium-card overflow-hidden">
+      <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+        <div>
+          <p className="text-sm font-semibold text-slate-950">{title}</p>
+          <p className="mt-0.5 text-[10px] text-slate-500">{helper}</p>
+        </div>
+        <div className={`flex h-9 min-w-9 items-center justify-center gap-2 rounded-xl px-2.5 ${tones[tone]}`}>
+          <Icon className="h-4 w-4" />
+          <span className="text-xs font-bold">{tasks.length}</span>
+        </div>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {tasks.length === 0 ? (
+          <p className="px-5 py-8 text-center text-xs text-slate-400">No tasks in this section.</p>
+        ) : tasks.map((task) => (
+          <button key={task.id} type="button" onClick={() => onOpen(task.id)} className="w-full px-5 py-4 text-left transition hover:bg-slate-50/80">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold text-slate-900">{task.title}</p>
+                <p className="mt-1 truncate text-[10px] text-slate-500">{task.company?.name || 'Client company'}</p>
+              </div>
+              <StatusBadge status={task.status} />
+            </div>
+            <p className="mt-2 text-[10px] text-slate-400">Due {formatDate(task.due_date)}</p>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+};
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { mode, isCS, isCA } = useWorkspace();
   const [taskId, setTaskId] = useState(null);
   const isPartner = user?.role === 'partner';
+  const workRole = (user?.designation || user?.role || '').toLowerCase().replaceAll(' ', '_');
+  const isExecutive = ['executive', 'intern', 'staff'].includes(workRole);
 
   const { data: partnerDashboard, isLoading: partnerDashboardLoading } = useQuery({
     queryKey: ['partner-dashboard', mode],
@@ -57,7 +98,7 @@ const Dashboard = () => {
   const { data: summary, isLoading: summaryLoading } = useQuery({ 
     queryKey: ['reports-summary', mode], 
     queryFn: () => getReportsSummary({ category: mode }),
-    enabled: !isPartner,
+    enabled: !isPartner && !isExecutive,
   });
   const { data: tasks = [], isLoading: tasksLoading } = useQuery({ 
     queryKey: ['tasks', mode], 
@@ -68,10 +109,14 @@ const Dashboard = () => {
   const { data: logs = [], isLoading: logsLoading } = useQuery({ 
     queryKey: ['system-audit-logs'], 
     queryFn: async () => (await api.get('/reports/audit-logs?limit=6')).data,
-    enabled: !isPartner,
+    enabled: !isPartner && !isExecutive,
   });
 
-  if (partnerDashboardLoading || (!isPartner && (summaryLoading || tasksLoading || logsLoading))) return <DashboardSkeleton />;
+  if (
+    (isPartner && partnerDashboardLoading) ||
+    (isExecutive && tasksLoading) ||
+    (!isPartner && !isExecutive && (summaryLoading || tasksLoading || logsLoading))
+  ) return <DashboardSkeleton />;
 
   if (isPartner) {
     const data = partnerDashboard || {};
@@ -152,6 +197,35 @@ const Dashboard = () => {
             ))}
           </div>
         </section>
+      </div>
+    );
+  }
+
+  if (isExecutive) {
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const isCompleted = (task) => ['completed_by_executive', 'waiting_for_review', 'approved', 'closed', 'completed'].includes(task.status);
+    const groups = [
+      ['Today’s Tasks', 'Due before the day ends', tasks.filter((task) => task.due_date === today && !isCompleted(task)), CalendarClock, 'blue'],
+      ['Upcoming', 'Your next assigned obligations', tasks.filter((task) => task.due_date > today && !isCompleted(task)), ArrowRight, 'amber'],
+      ['Overdue', 'Past deadline and still open', tasks.filter((task) => task.due_date < today && !isCompleted(task)), AlertTriangle, 'red'],
+      ['Completed', 'Work fully approved and closed', tasks.filter(isCompleted).reverse(), CheckCircle2, 'green'],
+    ];
+    return (
+      <div className="page-transition space-y-6">
+        <section className="overflow-hidden rounded-[24px] bg-[#0B1220] px-6 py-7 text-white shadow-[0_20px_60px_rgba(11,18,32,0.18)] sm:px-8">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-blue-300">Executive dashboard</p>
+          <h1 className="mt-3 text-2xl font-semibold tracking-[-0.035em] sm:text-[32px]">My Tasks</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+            A focused view of work assigned directly to you. Other executives’ tasks and company portfolios are not shown.
+          </p>
+        </section>
+        <section className="grid gap-5 lg:grid-cols-2">
+          {groups.map(([title, helper, groupTasks, icon, tone]) => (
+            <ExecutiveTaskGroup key={title} title={title} helper={helper} tasks={groupTasks} icon={icon} tone={tone} onOpen={setTaskId} />
+          ))}
+        </section>
+        <TaskDetail taskId={taskId} isOpen={Boolean(taskId)} onClose={() => setTaskId(null)} />
       </div>
     );
   }
