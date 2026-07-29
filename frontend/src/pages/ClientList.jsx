@@ -23,11 +23,9 @@ const ClientList = () => {
     company_type: 'private_limited',
     reg_date: '',
     financial_year_end: '2026-03-31',
-    assigned_to: '',
     relationship_partner_id: '',
     manager_id: '',
     assigned_team_id: '',
-    primary_executive_id: '',
     address: '',
     pan: '',
     gstin: '',
@@ -79,7 +77,7 @@ const ClientList = () => {
       return;
     }
     createClientMutation.mutate(
-      { ...formData, assigned_to: formData.primary_executive_id || null },
+      formData,
       {
         onSuccess: () => {
           setIsAddDrawerOpen(false);
@@ -89,11 +87,9 @@ const ClientList = () => {
             company_type: 'private_limited', 
             reg_date: '', 
             financial_year_end: '2026-03-31', 
-            assigned_to: '', 
             relationship_partner_id: '',
             manager_id: '',
             assigned_team_id: '',
-            primary_executive_id: '',
             address: '',
             pan: '',
             gstin: '',
@@ -119,43 +115,13 @@ const ClientList = () => {
   const partners = designated(['partner']);
   const managers = designated(['manager']);
   
-  // Debug: Check team and executives data
   const selectedTeam = teams.find((item) => getTeamId(item) === formData.assigned_team_id);
-  const executives = (users || []).filter((user) => {
-    const team = teams.find((item) => getTeamId(item) === formData.assigned_team_id);
-    if (!team) return false;
-    
-    // Method 1: Check if user is in team.member_ids
-    const memberIds = (team.member_ids || []).map((id) => String(id));
-    const inMemberIds = memberIds.some((id) => String(id) === String(user.id));
-    
-    if (inMemberIds) return true;
-    
-    // Method 2: Fallback - check if team is in user's team_ids (reverse lookup)
-    const userTeamIds = (user.team_ids || []).map((id) => String(id));
-    return userTeamIds.some((id) => String(id) === String(getTeamId(team)));
-  });
-  
-  // Debugging - log all relevant data
-  useEffect(() => {
-    console.log('=== CLIENTLIST FORM DEBUG ===');
-    console.log('Teams loaded:', teams?.length || 0, 'teams');
-    console.log('All teams:', teams?.map(t => ({ id: getTeamId(t), name: t.name, member_ids: t.member_ids })));
-    console.log('Users loaded:', users?.length || 0, 'users');
-    console.log('All users:', users?.map(u => ({ id: u.id, name: u.full_name, email: u.email, role: u.role, designation: u.designation })));
-  }, [teams, users]);
-  
-  useEffect(() => {
-    if (formData.assigned_team_id) {
-      console.log('--- TEAM SELECTED ---');
-      console.log('formData.assigned_team_id:', formData.assigned_team_id);
-      console.log('Teams array:', teams?.map(t => ({ id: getTeamId(t), name: t.name })));
-      console.log('Selected Team:', selectedTeam);
-      console.log('Team member_ids:', selectedTeam?.member_ids);
-      console.log('Filtered executives:', executives.map(e => ({ id: e.id, name: e.full_name, email: e.email })));
-      console.log('Executives count:', executives.length);
-    }
-  }, [formData.assigned_team_id, selectedTeam, executives]);
+  const automaticAssigneeIds = selectedTeam
+    ? [selectedTeam.manager_id, ...(selectedTeam.member_ids || [])].filter(Boolean)
+    : [];
+  const automaticAssignee = automaticAssigneeIds
+    .map((id) => (users || []).find((user) => String(user.id) === String(id) && user.is_active !== false))
+    .find(Boolean);
 
   return (
     <div className="space-y-6 page-transition">
@@ -222,10 +188,10 @@ const ClientList = () => {
             <thead>
               <tr className="border-b border-[#E5E7EB] bg-[#F8FAFC] h-10">
                 {isCS 
-                  ? ['Company Name', 'CIN', 'Type', 'Assigned CS', 'Status'].map((h) => (
+                  ? ['Company Name', 'CIN', 'Type', 'Assigned Team', 'Status'].map((h) => (
                       <th key={h} className="p-4 font-bold text-[#64748B] uppercase tracking-wider text-[10px]">{h}</th>
                     ))
-                  : ['Client Name', 'PAN / GSTIN', 'Type', 'Assigned CA', 'Status'].map((h) => (
+                  : ['Client Name', 'PAN / GSTIN', 'Type', 'Assigned Team', 'Status'].map((h) => (
                       <th key={h} className="p-4 font-bold text-[#64748B] uppercase tracking-wider text-[10px]">{h}</th>
                     ))
                 }
@@ -257,13 +223,13 @@ const ClientList = () => {
                   <th className="p-4">{isCS ? 'Company Name' : 'Client Name'}</th>
                   <th className="p-4">{isCS ? 'CIN' : 'PAN / GSTIN'}</th>
                   <th className="p-4">Type</th>
-                  <th className="p-4">{isCS ? 'Assigned CS' : 'Assigned CA'}</th>
+                  <th className="p-4">Assigned Team</th>
                   <th className="p-4">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#F1F5F9]">
                 {filteredCompanies.map((company) => {
-                  const assignedUser = users?.find((u) => u.id === company.assigned_to);
+                  const assignedTeam = teams.find((team) => String(getTeamId(team)) === String(company.assigned_team_id));
                   return (
                     <tr
                       key={company.id}
@@ -283,7 +249,7 @@ const ClientList = () => {
                         {company.company_type.replace('_', ' ')}
                       </td>
                       <td className="p-4 text-[#0F172A]">
-                        {assignedUser ? assignedUser.full_name || assignedUser.email : 'Unassigned'}
+                        {assignedTeam?.name || 'Unassigned'}
                       </td>
                       <td className="p-4">
                         <span className={`px-2 py-0.5 text-[10px] font-mono font-bold tracking-wider rounded uppercase ${
@@ -381,8 +347,20 @@ const ClientList = () => {
                 <p className="text-xs font-bold text-[#334155]">Client assignment</p>
                 <div className="space-y-1.5"><label className={labelCls}>Relationship Partner</label><select required name="relationship_partner_id" value={formData.relationship_partner_id} onChange={handleInputChange} className={inputCls}><option value="">Select partner</option>{partners.map(u => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}</select></div>
                 <div className="space-y-1.5"><label className={labelCls}>Primary Manager</label><select required name="manager_id" value={formData.manager_id} onChange={handleInputChange} className={inputCls}><option value="">Select manager</option>{managers.map(u => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}</select></div>
-                <div className="space-y-1.5"><label className={labelCls}>Assigned Team</label><select required name="assigned_team_id" value={formData.assigned_team_id} onChange={(event) => setFormData(prev => ({ ...prev, assigned_team_id: event.target.value, primary_executive_id: '' }))} className={inputCls}><option value="">Select team</option>{teams.map(team => <option key={getTeamId(team)} value={getTeamId(team)}>{team.name}</option>)}</select></div>
-                <div className="space-y-1.5"><label className={labelCls}>Primary Executive</label><select required disabled={!formData.assigned_team_id} name="primary_executive_id" value={formData.primary_executive_id} onChange={handleInputChange} className={inputCls}><option value="">Select executive</option>{executives.length > 0 ? executives.map(u => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>) : formData.assigned_team_id ? <option key="no-members" value="" disabled>No team members available</option> : null}</select></div>
+                <div className="space-y-1.5">
+                  <label className={labelCls}>Assigned Team</label>
+                  <select required name="assigned_team_id" value={formData.assigned_team_id} onChange={handleInputChange} className={inputCls}>
+                    <option value="">Select team</option>
+                    {teams.map(team => <option key={getTeamId(team)} value={getTeamId(team)}>{team.name}</option>)}
+                  </select>
+                  {selectedTeam && (
+                    <p className={`text-[10px] ${automaticAssignee ? 'text-[#64748B]' : 'text-amber-700'}`}>
+                      {automaticAssignee
+                        ? `New tasks will route automatically to ${automaticAssignee.full_name || automaticAssignee.email}.`
+                        : 'Add an active manager or member to this team before allocating the client.'}
+                    </p>
+                  )}
+                </div>
               </div>
               <div className="space-y-1.5">
                 <label className={labelCls}>Address</label>

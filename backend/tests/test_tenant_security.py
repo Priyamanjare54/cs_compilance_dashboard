@@ -13,7 +13,9 @@ from app.models.task import Task
 from app.models.user import User
 from app.services import scheduler
 from app.routers.admin import create_user
+from app.routers.clients import _resolve_team_assignee
 from app.routers.organizations import TeamInput, update_team
+from app.schemas.company import ClientAssignmentUpdate
 from app.schemas.user import UserCreate
 from app.models.team import Team
 
@@ -78,6 +80,72 @@ async def test_team_from_another_workspace_cannot_be_edited(monkeypatch):
     with pytest.raises(HTTPException) as error:
         await update_team(uuid.uuid4(), TeamInput(name="ROC Team"), current_user)
     assert error.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_client_allocation_routes_to_team_manager(monkeypatch):
+    organization_id = uuid.uuid4()
+    partner_id = uuid.uuid4()
+    manager_id = uuid.uuid4()
+    team_manager_id = uuid.uuid4()
+    member_id = uuid.uuid4()
+    team = SimpleNamespace(
+        id=uuid.uuid4(),
+        organization_id=organization_id,
+        manager_id=team_manager_id,
+        member_ids=[member_id],
+    )
+    users = {
+        user_id: SimpleNamespace(id=user_id)
+        for user_id in (partner_id, manager_id, team_manager_id, member_id)
+    }
+
+    def find_users(query):
+        requested_ids = query["_id"]["$in"]
+        return _Query([users[user_id] for user_id in requested_ids if user_id in users])
+
+    monkeypatch.setattr(User, "find", find_users)
+    monkeypatch.setattr(Team, "get", AsyncMock(return_value=team))
+    assignment = ClientAssignmentUpdate(
+        relationship_partner_id=partner_id,
+        manager_id=manager_id,
+        assigned_team_id=team.id,
+    )
+
+    assert await _resolve_team_assignee(assignment, organization_id) == team_manager_id
+
+
+@pytest.mark.asyncio
+async def test_client_allocation_falls_back_to_first_active_team_member(monkeypatch):
+    organization_id = uuid.uuid4()
+    partner_id = uuid.uuid4()
+    manager_id = uuid.uuid4()
+    inactive_member_id = uuid.uuid4()
+    active_member_id = uuid.uuid4()
+    team = SimpleNamespace(
+        id=uuid.uuid4(),
+        organization_id=organization_id,
+        manager_id=None,
+        member_ids=[inactive_member_id, active_member_id],
+    )
+    active_users = {
+        user_id: SimpleNamespace(id=user_id)
+        for user_id in (partner_id, manager_id, active_member_id)
+    }
+
+    def find_users(query):
+        requested_ids = query["_id"]["$in"]
+        return _Query([active_users[user_id] for user_id in requested_ids if user_id in active_users])
+
+    monkeypatch.setattr(User, "find", find_users)
+    monkeypatch.setattr(Team, "get", AsyncMock(return_value=team))
+    assignment = ClientAssignmentUpdate(
+        relationship_partner_id=partner_id,
+        manager_id=manager_id,
+        assigned_team_id=team.id,
+    )
+
+    assert await _resolve_team_assignee(assignment, organization_id) == active_member_id
 
 
 class _Query:

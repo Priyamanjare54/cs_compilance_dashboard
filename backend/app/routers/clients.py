@@ -28,26 +28,39 @@ async def _tenant_user(user_id: uuid.UUID | None, organization_id: uuid.UUID) ->
     user = await User.get(user_id)
     return user if user and user.organization_id == organization_id else None
 
-async def _validate_assignment(data: ClientAssignmentUpdate, organization_id: uuid.UUID) -> None:
-    """Ensure all assignment records are tenant-local and the executive is in the selected team."""
-    ids = [data.relationship_partner_id, data.manager_id, data.primary_executive_id]
-    users = await User.find({"_id": {"$in": ids}, "organization_id": organization_id, "is_active": True}).to_list()
-    if len(users) != len(set(ids)):
+async def _resolve_team_assignee(data: ClientAssignmentUpdate, organization_id: uuid.UUID) -> uuid.UUID:
+    """Validate the allocation and derive the person who receives the team's tasks."""
+    oversight_ids = [data.relationship_partner_id, data.manager_id]
+    users = await User.find({"_id": {"$in": oversight_ids}, "organization_id": organization_id, "is_active": True}).to_list()
+    if len(users) != len(set(oversight_ids)):
         raise HTTPException(status_code=400, detail="Assigned users must be active members of this organization")
+
     team = await Team.get(data.assigned_team_id)
     if not team or team.organization_id != organization_id:
         raise HTTPException(status_code=400, detail="Assigned team must belong to this organization")
-    executive = next(user for user in users if user.id == data.primary_executive_id)
-    if executive.id not in team.member_ids and team.id not in executive.team_ids:
-        raise HTTPException(status_code=400, detail="Primary executive must belong to the selected team")
 
-def _apply_assignment(company: Company, data: ClientAssignmentUpdate) -> None:
+    candidate_ids = list(dict.fromkeys(
+        ([team.manager_id] if team.manager_id else []) + list(team.member_ids or [])
+    ))
+    members = await User.find({
+        "_id": {"$in": candidate_ids},
+        "organization_id": organization_id,
+        "is_active": True,
+    }).to_list() if candidate_ids else []
+    active_member_ids = {member.id for member in members}
+    assignee_id = next((candidate_id for candidate_id in candidate_ids if candidate_id in active_member_ids), None)
+    if not assignee_id:
+        raise HTTPException(status_code=400, detail="Assigned team must have at least one active member")
+    return assignee_id
+
+
+def _apply_assignment(company: Company, data: ClientAssignmentUpdate, assignee_id: uuid.UUID) -> None:
     company.relationship_partner_id = data.relationship_partner_id
     company.manager_id = data.manager_id
     company.assigned_team_id = data.assigned_team_id
-    company.primary_executive_id = data.primary_executive_id
+    company.primary_executive_id = assignee_id
     # Preserve the existing assignment fields for older task/calendar screens.
-    company.assigned_to = data.primary_executive_id
+    company.assigned_to = assignee_id
     company.assigned_team = data.assigned_team_id
     company.relationship_manager = data.manager_id
 
@@ -221,9 +234,9 @@ async def create_company(
         )
         
     assignment = ClientAssignmentUpdate(**company_in.model_dump())
-    await _validate_assignment(assignment, current_user.organization_id)
+    assignee_id = await _resolve_team_assignee(assignment, current_user.organization_id)
     company = Company(**company_in.model_dump(), organization_id=current_user.organization_id)
-    _apply_assignment(company, assignment)
+    _apply_assignment(company, assignment, assignee_id)
     await company.insert()
 
     # Log audit: company created
@@ -288,13 +301,17 @@ async def update_client_assignment(
     current_user: User = Depends(get_current_user),
 ):
     company = await _company_for_user(company_id, current_user)
-    await _validate_assignment(assignment, current_user.organization_id)
-    old_assignment = {key: str(getattr(company, key)) if getattr(company, key) else None for key in assignment.model_dump()}
-    _apply_assignment(company, assignment)
+    assignee_id = await _resolve_team_assignee(assignment, current_user.organization_id)
+    assignment_keys = ("relationship_partner_id", "manager_id", "assigned_team_id", "primary_executive_id")
+    old_assignment = {key: str(getattr(company, key)) if getattr(company, key) else None for key in assignment_keys}
+    _apply_assignment(company, assignment, assignee_id)
     await company.save()
     await AuditLog(user_id=current_user.id, organization_id=current_user.organization_id,
                    action="client_assignment_updated", entity_type="company", entity_id=company.id,
-                   action_metadata={"old": old_assignment, "new": assignment.model_dump(mode="json")}).insert()
+                   action_metadata={"old": old_assignment, "new": {
+                       **assignment.model_dump(mode="json"),
+                       "primary_executive_id": str(assignee_id),
+                   }}).insert()
     return company
 
 @router.put("/{company_id}", response_model=CompanyResponse)

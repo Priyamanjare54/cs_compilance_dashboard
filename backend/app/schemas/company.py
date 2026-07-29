@@ -14,7 +14,7 @@ class CompanyBase(BaseModel):
     relationship_partner_id: uuid.UUID
     manager_id: uuid.UUID
     assigned_team_id: uuid.UUID
-    primary_executive_id: uuid.UUID
+    primary_executive_id: Optional[uuid.UUID] = None
     assigned_team: Optional[uuid.UUID] = None
     relationship_manager: Optional[uuid.UUID] = None
     industry: Optional[str] = None
@@ -89,4 +89,6 @@ class ClientAssignmentUpdate(BaseModel):
     relationship_partner_id: uuid.UUID
     manager_id: uuid.UUID
     assigned_team_id: uuid.UUID
-    primary_executive_id: uuid.UUID
+    # Kept optional for compatibility with older clients. The backend derives the
+    # task assignee from the selected team's manager/member structure.
+    primary_executive_id: Optional[uuid.UUID] = None
