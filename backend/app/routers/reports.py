@@ -34,7 +34,8 @@ async def get_partner_dashboard(
     today = date.today()
     open_tasks = [task for task in tasks if task.status != "closed"]
     overdue = [task for task in open_tasks if task.due_date < today]
-    upcoming_due = [task for task in open_tasks if today <= task.due_date <= today + timedelta(days=7)]
+    todays_due = [task for task in open_tasks if task.due_date == today]
+    upcoming_due = [task for task in open_tasks if today < task.due_date <= today + timedelta(days=7)]
     high_risk_company_ids = {task.company_id for task in overdue}
     closed_count = sum(task.status == "closed" for task in tasks)
     productivity = round((closed_count / len(tasks) * 100) if tasks else 100)
@@ -57,17 +58,40 @@ async def get_partner_dashboard(
 
     company_names = {company.id: company.name for company in companies}
     delayed_by_company = {}
+    overdue_tasks = []
     for task in overdue:
         delayed_by_company[task.company_id] = delayed_by_company.get(task.company_id, 0) + 1
+        overdue_tasks.append(task)
     top_company_id = max(delayed_by_company, key=delayed_by_company.get, default=None)
 
+    delayed_tasks = [
+        {
+            "id": str(task.id),
+            "company_id": task.company_id,
+            "company_name": company_names.get(task.company_id, "Unknown client"),
+            "title": task.title,
+            "assigned_name": users_by_id.get(task.assigned_to) or users_by_id.get(task.assigned_user) or "Unassigned",
+            "assigned_user_id": str(task.assigned_to or task.assigned_user) if (task.assigned_to or task.assigned_user) else None,
+            "delay_days": (today - task.due_date).days,
+            "due_date": task.due_date,
+            "status": task.status,
+        }
+        for task in sorted(overdue_tasks, key=lambda item: item.due_date)
+    ]
+
     return {
-        "clients": len(companies), "pending_filings": len(open_tasks), "overdue": len(overdue),
-        "high_risk_clients": len(high_risk_company_ids), "team_productivity": productivity,
+        "clients": len(companies),
+        "pending_filings": len(open_tasks),
+        "completed": closed_count,
+        "delayed": len(overdue),
+        "todays_due": len(todays_due),
+        "high_risk_clients": len(high_risk_company_ids),
+        "team_productivity": productivity,
         "upcoming_due": len(upcoming_due),
         "top_delayed_team": teams_by_id.get(top_team_id, "No delayed team"),
         "top_performer": users_by_id.get(top_user_id, "No completed work yet"),
         "most_delayed_client": company_names.get(top_company_id, "No delayed client"),
+        "delayed_tasks": delayed_tasks,
     }
 
 @router.get("/summary", response_model=SummaryReportResponse)

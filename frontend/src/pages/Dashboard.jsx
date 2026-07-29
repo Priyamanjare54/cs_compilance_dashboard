@@ -76,13 +76,14 @@ const Dashboard = () => {
   if (isPartner) {
     const data = partnerDashboard || {};
     const cards = [
-      ['Clients', data.clients, 'Active portfolio', Building2, 'blue'],
-      ['Pending Filings', data.pending_filings, 'Across all clients', FileSpreadsheet, 'amber'],
-      ['Overdue', data.overdue, 'Need immediate attention', AlertTriangle, 'red'],
-      ['High Risk Clients', data.high_risk_clients, 'One or more overdue filings', AlertTriangle, 'red'],
+      ['Total Clients', data.clients, 'Active portfolio', Building2, 'blue'],
+      ['Pending Compliance', data.pending_filings, 'Open tasks across all clients', FileSpreadsheet, 'amber'],
+      ['Completed', data.completed, 'Tasks that are fully closed', CheckCircle2, 'green'],
+      ['Delayed', data.delayed, 'Overdue filings needing action', AlertTriangle, 'red'],
+      ["Today's Due", data.todays_due, 'Filings due today', CalendarClock, 'amber'],
       ['Team Productivity', `${data.team_productivity ?? 0}%`, 'Closed filings rate', UsersRound, 'green'],
-      ['Upcoming Due', data.upcoming_due, 'Due in the next 7 days', CalendarClock, 'amber'],
     ];
+    const delayedTasks = data.delayed_tasks || [];
     return (
       <div className="page-transition space-y-6">
         <section className="overflow-hidden rounded-[24px] bg-[#0B1220] px-6 py-7 text-white shadow-[0_20px_60px_rgba(11,18,32,0.18)] sm:px-8">
@@ -113,6 +114,43 @@ const Dashboard = () => {
             <p className="mt-2 text-xs text-slate-500">Client with the highest number of overdue filings.</p>
             <span className="mt-5 inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600">Open portfolio <ArrowRight className="h-3.5 w-3.5" /></span>
           </Link>
+        </section>
+
+        <section className="premium-card p-6">
+          <div className="flex items-center justify-between gap-3 pb-4 border-b border-slate-200">
+            <div>
+              <p className="eyebrow">Delayed compliance work</p>
+              <p className="mt-1 text-sm text-slate-500">Drill into overdue filings and see who is assigned.</p>
+            </div>
+            <span className="rounded-full bg-rose-50 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-rose-700">{delayedTasks.length} overdue</span>
+          </div>
+          <div className="mt-5 space-y-3">
+            {delayedTasks.length === 0 ? (
+              <p className="text-sm text-slate-500">No overdue filings in your current portfolio.</p>
+            ) : delayedTasks.map((task) => (
+              <button
+                key={task.id}
+                type="button"
+                onClick={() => setTaskId(task.id)}
+                className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:border-slate-300 hover:shadow-sm"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900 truncate">{task.title}</p>
+                    <p className="mt-1 text-xs text-slate-500 truncate">{task.company_name}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Delay</p>
+                    <p className="mt-1 text-sm font-semibold text-rose-700">{task.delay_days} days</p>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-500">
+                  <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-2.5 py-1">Assigned: {task.assigned_name}</span>
+                  <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-2.5 py-1">Due {new Date(task.due_date).toLocaleDateString('en-IN')}</span>
+                </div>
+              </button>
+            ))}
+          </div>
         </section>
       </div>
     );
