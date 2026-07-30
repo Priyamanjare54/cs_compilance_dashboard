@@ -7,28 +7,8 @@ from app.models.team import Team
 from app.models.company import Company
 from app.services.notifications import create_notification
 import logging
-import uuid
 
 logger = logging.getLogger(__name__)
-
-async def _get_task_manager_id(task: Task) -> uuid.UUID | None:
-    team_id = task.assigned_team_id or task.assigned_team
-    if team_id:
-        team = await Team.get(team_id)
-        if team and team.organization_id == task.organization_id:
-            return team.manager_id
-
-    company = await Company.get(task.company_id)
-    if company and company.organization_id == task.organization_id:
-        return company.manager_id
-
-    return None
-
-async def _get_task_partner_id(task: Task) -> uuid.UUID | None:
-    company = await Company.get(task.company_id)
-    if company and company.organization_id == task.organization_id:
-        return company.relationship_partner_id or task.approver_id or task.approver
-    return task.approver_id or task.approver
 
 async def run_daily_compliance_check():
     """
