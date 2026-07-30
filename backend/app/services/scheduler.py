@@ -7,8 +7,28 @@ from app.models.team import Team
 from app.models.company import Company
 from app.services.notifications import create_notification
 import logging
+import uuid
 
 logger = logging.getLogger(__name__)
+
+async def _get_task_manager_id(task: Task) -> uuid.UUID | None:
+    team_id = task.assigned_team_id or task.assigned_team
+    if team_id:
+        team = await Team.get(team_id)
+        if team and team.organization_id == task.organization_id:
+            return team.manager_id
+
+    company = await Company.get(task.company_id)
+    if company and company.organization_id == task.organization_id:
+        return company.manager_id
+
+    return None
+
+async def _get_task_partner_id(task: Task) -> uuid.UUID | None:
+    company = await Company.get(task.company_id)
+    if company and company.organization_id == task.organization_id:
+        return company.relationship_partner_id or task.approver_id or task.approver
+    return task.approver_id or task.approver
 
 async def run_daily_compliance_check():
     """
@@ -21,20 +41,31 @@ async def run_daily_compliance_check():
     tasks = await Task.find({"status": {"$ne": "closed"}}).to_list()
     
     today = date.today()
-    updated_count = 0
+    reminder_count = 0
     
     for task in tasks:
         if not task.organization_id:
             continue
+
         days_to_due = (task.due_date - today).days
         if days_to_due in {7, 3, 1, 0}:
             await create_notification(
                 organization_id=task.organization_id, user_id=task.assigned_to, task_id=task.id,
                 type="reminders", title="Task due reminder",
-                message=f"{task.title} is due {'today' if days_to_due == 0 else f'in {days_to_due} day(s)'}.",
+                message=f"{task.title} is due {'today' if days_to_due == 0 else f'in {days_to_due} day(s)' }.",
                 dedupe_key=f"task:{task.id}:reminder:{task.due_date.isoformat()}:{days_to_due}",
             )
-            updated_count += 1
+            reminder_count += 1
+
+            manager_id = await _get_task_manager_id(task)
+            if manager_id:
+                await create_notification(
+                    organization_id=task.organization_id, user_id=manager_id, task_id=task.id,
+                    type="reminders", title="Manager reminder: task due soon",
+                    message=f"{task.title} assigned to your team is due {'today' if days_to_due == 0 else f'in {days_to_due} day(s)' }.",
+                    dedupe_key=f"task:{task.id}:reminder:manager:{task.due_date.isoformat()}:{days_to_due}",
+                )
+                reminder_count += 1
 
         overdue_days = (today - task.due_date).days
         if overdue_days >= 1:
@@ -45,12 +76,7 @@ async def run_daily_compliance_check():
                 dedupe_key=f"task:{task.id}:overdue:executive",
             )
         if overdue_days >= 3:
-            team_id = task.assigned_team_id or task.assigned_team
-            team = await Team.get(team_id) if team_id else None
-            manager_id = team.manager_id if team and team.organization_id == task.organization_id else None
-            if not manager_id:
-                company = await Company.get(task.company_id)
-                manager_id = company.manager_id if company and company.organization_id == task.organization_id else None
+            manager_id = await _get_task_manager_id(task)
             await create_notification(
                 organization_id=task.organization_id, user_id=manager_id, task_id=task.id,
                 type="escalations", title="Manager escalation: overdue task",
@@ -58,8 +84,7 @@ async def run_daily_compliance_check():
                 dedupe_key=f"task:{task.id}:overdue:manager",
             )
         if overdue_days >= 7:
-            company = await Company.get(task.company_id)
-            partner_id = (company.relationship_partner_id if company and company.organization_id == task.organization_id else None) or task.approver_id or task.approver
+            partner_id = await _get_task_partner_id(task)
             await create_notification(
                 organization_id=task.organization_id, user_id=partner_id, task_id=task.id,
                 type="escalations", title="Partner escalation: overdue task",
@@ -67,8 +92,7 @@ async def run_daily_compliance_check():
                 dedupe_key=f"task:{task.id}:overdue:partner",
             )
                         
-    logger.info(f"Daily notification check completed. Processed {updated_count} reminder events.")
-
+    logger.info(f"Daily notification check completed. Processed {reminder_count} reminder events.")
 scheduler = AsyncIOScheduler()
 
 def start_scheduler():

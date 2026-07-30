@@ -39,6 +39,7 @@ async def test_partner_dashboard_returns_expected_metrics(monkeypatch):
         SimpleNamespace(
             id=uuid.uuid4(),
             company_id=company_id,
+            title="Annual Return Filing",
             assigned_to=assignee_id,
             assigned_user=None,
             due_date=date.today() - timedelta(days=5),
@@ -49,6 +50,7 @@ async def test_partner_dashboard_returns_expected_metrics(monkeypatch):
         SimpleNamespace(
             id=uuid.uuid4(),
             company_id=company_id,
+            title="Board Meeting Minutes",
             assigned_to=assignee_id,
             assigned_user=None,
             due_date=date.today(),
@@ -59,6 +61,7 @@ async def test_partner_dashboard_returns_expected_metrics(monkeypatch):
         SimpleNamespace(
             id=uuid.uuid4(),
             company_id=company_id,
+            title="Director KYC",
             assigned_to=closed_by_id,
             assigned_user=None,
             due_date=date.today() - timedelta(days=2),

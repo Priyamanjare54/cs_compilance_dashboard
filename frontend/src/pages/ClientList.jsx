@@ -23,6 +23,7 @@ const ClientList = () => {
     company_type: 'private_limited',
     reg_date: '',
     financial_year_end: '2026-03-31',
+    industry: '',
     relationship_partner_id: '',
     manager_id: '',
     assigned_team_id: '',
@@ -87,6 +88,7 @@ const ClientList = () => {
             company_type: 'private_limited', 
             reg_date: '', 
             financial_year_end: '2026-03-31', 
+            industry: '',
             relationship_partner_id: '',
             manager_id: '',
             assigned_team_id: '',
@@ -334,6 +336,11 @@ const ClientList = () => {
                   <option value="individual">Individual</option>
                 </select>
               </div>
+              <div className="space-y-1.5">
+                <label className={labelCls}>Industry</label>
+                <input type="text" name="industry" placeholder="e.g. Manufacturing, Retail, Technology" value={formData.industry} onChange={handleInputChange} className={inputCls} />
+                <p className="text-[10px] text-[#64748B]">Optional. Used to infer the right team assignment if left blank.</p>
+              </div>
 
               <div className="space-y-1.5">
                 <label className={labelCls}>Registration/Inception Date</label>
@@ -345,12 +352,12 @@ const ClientList = () => {
               </div>
               <div className="rounded-lg border border-[#E5E7EB] bg-slate-50/60 p-3 space-y-3">
                 <p className="text-xs font-bold text-[#334155]">Client assignment</p>
-                <div className="space-y-1.5"><label className={labelCls}>Relationship Partner</label><select required name="relationship_partner_id" value={formData.relationship_partner_id} onChange={handleInputChange} className={inputCls}><option value="">Select partner</option>{partners.map(u => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}</select></div>
-                <div className="space-y-1.5"><label className={labelCls}>Primary Manager</label><select required name="manager_id" value={formData.manager_id} onChange={handleInputChange} className={inputCls}><option value="">Select manager</option>{managers.map(u => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}</select></div>
+                <div className="space-y-1.5"><label className={labelCls}>Relationship Partner</label><select name="relationship_partner_id" value={formData.relationship_partner_id} onChange={handleInputChange} className={inputCls}><option value="">Auto-select default partner</option>{partners.map(u => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}</select></div>
+                <div className="space-y-1.5"><label className={labelCls}>Primary Manager</label><select name="manager_id" value={formData.manager_id} onChange={handleInputChange} className={inputCls}><option value="">Auto-select default manager</option>{managers.map(u => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}</select></div>
                 <div className="space-y-1.5">
                   <label className={labelCls}>Assigned Team</label>
-                  <select required name="assigned_team_id" value={formData.assigned_team_id} onChange={handleInputChange} className={inputCls}>
-                    <option value="">Select team</option>
+                  <select name="assigned_team_id" value={formData.assigned_team_id} onChange={handleInputChange} className={inputCls}>
+                    <option value="">Auto-assign based on industry/type</option>
                     {teams.map(team => <option key={getTeamId(team)} value={getTeamId(team)}>{team.name}</option>)}
                   </select>
                   {selectedTeam && (

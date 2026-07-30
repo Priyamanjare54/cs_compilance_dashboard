@@ -19,6 +19,66 @@ import re
 router = APIRouter(prefix="/companies", tags=["companies"])
 clients_router = APIRouter(prefix="/clients", tags=["clients"])
 
+DEFAULT_TEAM_PREFERENCE = {
+    "private_limited": ["roc", "core", "compliance"],
+    "public_limited": ["roc", "core", "compliance"],
+    "opc": ["roc", "core", "compliance"],
+    "llp": ["llp", "compliance", "roc"],
+    "partnership": ["partnership", "compliance", "roc"],
+    "proprietorship": ["proprietorship", "tax", "compliance"],
+    "individual": ["individual", "tax", "compliance"],
+}
+
+async def _find_default_team(company: Company, organization_id: uuid.UUID) -> Team | None:
+    teams = await Team.find({"organization_id": organization_id}).to_list()
+    if not teams:
+        return None
+
+    if company.assigned_team_id:
+        assigned_team = await Team.get(company.assigned_team_id)
+        if assigned_team and assigned_team.organization_id == organization_id:
+            return assigned_team
+
+    industry = (company.industry or "").strip().lower()
+    if industry:
+        for team in teams:
+            if industry in (team.name or "").lower():
+                return team
+
+    preferred = DEFAULT_TEAM_PREFERENCE.get((company.company_type or "").lower(), ["compliance"])
+    for keyword in preferred:
+        for team in teams:
+            if keyword in (team.name or "").lower():
+                return team
+
+    return teams[0]
+
+async def _find_default_partner(organization_id: uuid.UUID) -> uuid.UUID | None:
+    partners = await User.find({
+        "organization_id": organization_id,
+        "is_active": True,
+        "$or": [{"role": "partner"}, {"designation": "partner"}],
+    }).sort("full_name").to_list()
+    return partners[0].id if partners else None
+
+async def _find_default_manager(team: Team | None, organization_id: uuid.UUID) -> uuid.UUID | None:
+    if team and team.manager_id:
+        manager = await User.get(team.manager_id)
+        if manager and manager.organization_id == organization_id and manager.is_active:
+            return manager.id
+    managers = await User.find({
+        "organization_id": organization_id,
+        "is_active": True,
+        "$or": [{"role": "manager"}, {"designation": "manager"}],
+    }).sort("full_name").to_list()
+    return managers[0].id if managers else None
+
+async def _get_team_by_id(team_id: uuid.UUID, organization_id: uuid.UUID) -> Team | None:
+    if not team_id:
+        return None
+    team = await Team.get(team_id)
+    return team if team and team.organization_id == organization_id else None
+
 def _is_executive(user: User) -> bool:
     return (user.designation or user.role or "").lower().replace(" ", "_") in {"executive", "intern", "staff"}
 
@@ -224,6 +284,7 @@ async def create_company(
 ):
     if _is_executive(current_user):
         raise HTTPException(status_code=403, detail="Executives cannot manage companies")
+
     if company_in.cin:
         existing = await Company.find_one({"cin": company_in.cin, "organization_id": current_user.organization_id})
         if existing:
@@ -243,10 +304,39 @@ async def create_company(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Either CIN or PAN must be provided."
         )
-        
-    assignment = ClientAssignmentUpdate(**company_in.model_dump())
+
+    company_data = company_in.model_dump(exclude_none=True)
+    company = Company(**company_data, organization_id=current_user.organization_id)
+
+    team = await _get_team_by_id(company.assigned_team_id, current_user.organization_id)
+    if not team:
+        team = await _find_default_team(company, current_user.organization_id)
+        if team:
+            company.assigned_team_id = team.id
+            company.assigned_team = team.id
+
+    if not company.relationship_partner_id:
+        company.relationship_partner_id = await _find_default_partner(current_user.organization_id)
+    if not company.manager_id:
+        company.manager_id = await _find_default_manager(team, current_user.organization_id)
+
+    if not company.assigned_team_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not infer a default team assignment for this company. Please create a team first or provide an assigned team."
+        )
+    if not company.relationship_partner_id or not company.manager_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not infer a default partner or manager assignment. Please provide these fields explicitly."
+        )
+
+    assignment = ClientAssignmentUpdate(
+        relationship_partner_id=company.relationship_partner_id,
+        manager_id=company.manager_id,
+        assigned_team_id=company.assigned_team_id,
+    )
     assignee_id = await _resolve_team_assignee(assignment, current_user.organization_id)
-    company = Company(**company_in.model_dump(), organization_id=current_user.organization_id)
     _apply_assignment(company, assignment, assignee_id)
     await company.insert()
 

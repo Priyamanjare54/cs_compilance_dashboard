@@ -23,7 +23,12 @@ class CompanyBase(BaseModel):
     client_type: str = "cs"  # cs, ca, both
 
 class CompanyCreate(CompanyBase):
-    pass
+    relationship_partner_id: Optional[uuid.UUID] = None
+    manager_id: Optional[uuid.UUID] = None
+    assigned_team_id: Optional[uuid.UUID] = None
+    primary_executive_id: Optional[uuid.UUID] = None
+    assigned_team: Optional[uuid.UUID] = None
+    relationship_manager: Optional[uuid.UUID] = None
 
 class CompanyUpdate(BaseModel):
     cin: Optional[str] = Field(None, min_length=21, max_length=21)
