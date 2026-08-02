@@ -18,6 +18,9 @@ class ComplianceRuleUpdate(BaseModel):
     name: Optional[str] = None
     form_number: Optional[str] = None
     company_types: Optional[List[str]] = None
+    min_paid_up_capital: Optional[float] = None
+    min_annual_turnover: Optional[float] = None
+    min_bank_loan_amount: Optional[float] = None
     frequency: Optional[str] = None
     due_days_from_trigger: Optional[int] = None
     description: Optional[str] = None

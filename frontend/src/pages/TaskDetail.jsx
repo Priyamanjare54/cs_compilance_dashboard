@@ -8,6 +8,8 @@ import { useAuth } from '../context/AuthContext';
 import { formatDate, getDeadlineColorClass, getDeadlineLabel } from '../utils/dateUtils';
 import StatusBadge from '../components/StatusBadge';
 import Loader from '../components/Loader';
+import api from '../services/api';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 const TaskDetail = ({ taskId, isOpen, onClose }) => {
   const { user: currentUser, isAdmin } = useAuth();
@@ -16,8 +18,20 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
   const [selectedAssignee, setSelectedAssignee] = useState('');
   const [workflowComment, setWorkflowComment] = useState('');
   const [newCommentText, setNewCommentText] = useState('');
+  const [newRemarkText, setNewRemarkText] = useState('');
 
   const { data: task, isLoading, isError } = useTaskDetails(taskId);
+  const queryClient = useQueryClient();
+
+  const addRemarkMutation = useMutation({
+    mutationFn: async ({ id, content }) => {
+      return (await api.post(`/tasks/${id}/remarks`, { content })).data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] });
+      setNewRemarkText('');
+    }
+  });
 
   const { data: usersList } = useQuery({
     queryKey: ['users'],
@@ -69,6 +83,14 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
     });
   };
 
+  const handleAddRemark = () => {
+    if (!newRemarkText.trim()) return;
+    addRemarkMutation.mutate({
+      id: taskId,
+      content: newRemarkText
+    });
+  };
+
   const handleSaveNotes = () => {
     updateTaskMutation.mutate({ id: taskId, data: { notes: notesText } });
   };
@@ -83,7 +105,6 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
     updateTaskMutation.mutate({ id: taskId, data: { assigned_to: newAssigneeId || null } });
   };
 
-
   const deadlineColor = task ? getDeadlineColorClass(task.due_date, task.status === 'closed') : '';
   const deadlineLabel = task ? getDeadlineLabel(task.due_date) : '';
 
@@ -91,15 +112,12 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
 
   return (
     <>
-      {/* Drawer Backdrop */}
       <div
         className="fixed inset-0 bg-[#0F172A]/30 backdrop-blur-[2px] z-40 transition-opacity duration-200"
         onClick={onClose}
       />
 
-      {/* Drawer Container */}
       <div className="fixed inset-y-0 right-0 z-50 w-[480px] h-screen bg-white border-l border-[#E5E7EB] shadow-2xl flex flex-col">
-        {/* Header */}
         <div className="p-4 border-b border-[#E5E7EB] flex items-center justify-between bg-[#F8FAFC]">
           <div className="flex items-center space-x-3 min-w-0 pr-4">
             <StatusBadge status={task?.status} />
@@ -113,7 +131,6 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
           </button>
         </div>
 
-        {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {isLoading ? (
             <Loader />
@@ -124,7 +141,6 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
             </div>
           ) : (
             <>
-              {/* Task Title & Meta */}
               <div>
                 <h3 className="text-[#0F172A] text-lg font-bold leading-snug">{task.title}</h3>
                 <div className="mt-2 text-xs flex flex-wrap items-center gap-1.5 text-[#64748B]">
@@ -150,7 +166,57 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
                 </div>
               </div>
 
-              {/* Due Date */}
+              {/* Reviews & Remarks Section */}
+              <div className="space-y-3 bg-amber-50/50 border border-amber-200/60 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <span className="block text-xs font-bold text-amber-900 uppercase tracking-wide">Reviews & Remarks</span>
+                  <span className="text-[10px] font-mono text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded">Append-only Log</span>
+                </div>
+                <p className="text-[11px] text-amber-800 leading-normal">
+                  Record delay reasons, pending actions, or issues encountered during filing. Accessible by any authorized user.
+                </p>
+
+                {task.remarks && task.remarks.length > 0 ? (
+                  <div className="space-y-2 pt-1">
+                    {task.remarks.map((remark) => (
+                      <div key={remark.id} className="bg-white border border-amber-200 rounded-md p-3 text-xs shadow-sm">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="font-bold text-[#0F172A]">{remark.user_name}</span>
+                          <span className="text-[10px] text-[#94A3B8] font-mono">
+                            {new Date(remark.created_at).toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                        <p className="text-slate-700 leading-relaxed break-words">{remark.content}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-amber-800/70 italic text-center py-2 bg-white/60 border border-dashed border-amber-200 rounded-md">
+                    No remarks recorded yet.
+                  </p>
+                )}
+
+                <div className="flex gap-2 pt-1">
+                  <input
+                    type="text"
+                    placeholder="Add a remark (delay reason, review note, issue)..."
+                    value={newRemarkText}
+                    onChange={(e) => setNewRemarkText(e.target.value)}
+                    className="flex-grow h-8 bg-white border border-amber-300 rounded-md px-3 text-[#0F172A] placeholder-amber-400 outline-none text-xs focus:border-amber-600"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleAddRemark();
+                    }}
+                  />
+                  <button
+                    onClick={handleAddRemark}
+                    disabled={addRemarkMutation.isPending || !newRemarkText.trim()}
+                    className="h-8 bg-amber-600 hover:bg-amber-700 text-white px-3 rounded-md text-xs font-bold transition-colors disabled:opacity-50 shadow-sm"
+                  >
+                    Add Remark
+                  </button>
+                </div>
+              </div>
+
               <div className="bg-[#F8FAFC] border border-[#E5E7EB] rounded-lg p-4 flex items-center justify-between">
                 <div className="space-y-1">
                   <span className="text-[11px] font-bold text-[#64748B] uppercase tracking-wider block">Due Date</span>
@@ -166,8 +232,6 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
                 )}
               </div>
 
-
-              {/* Assignee */}
               <div className="space-y-2">
                 <label className="block text-xs font-bold text-[#64748B] uppercase tracking-wide">Assignee</label>
                 {isAdmin ? (
@@ -192,7 +256,6 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
                 )}
               </div>
 
-              {/* Notes */}
               <div className="space-y-2">
                 <label className="block text-xs font-bold text-[#64748B] uppercase tracking-wide">Notes</label>
                 <textarea
@@ -211,7 +274,6 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
                 </button>
               </div>
 
-              {/* Reference Document */}
               <div className="space-y-2">
                 <label className="block text-xs font-bold text-[#64748B] uppercase tracking-wide">Reference Document (URL)</label>
                 <div className="flex gap-2">
@@ -243,7 +305,6 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
                 )}
               </div>
 
-              {/* Workflow Review Panel */}
               {task.status !== 'closed' && (
                 <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-4">
                   <span className="text-[11px] font-bold text-[#64748B] uppercase tracking-wider block">Workflow Review Stage</span>
@@ -254,7 +315,6 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
                     </span>
                   </div>
 
-                  {/* Executive Actions */}
                   {(task.status === 'pending' || task.status === 'returned_with_comments' || task.status === 'in_progress' || task.status === 'completed_by_executive') && (
                     <div className="space-y-3">
                       <textarea
@@ -274,7 +334,6 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
                     </div>
                   )}
 
-                  {/* Team Lead Stage */}
                   {task.status === 'waiting_for_review' && (
                     <div className="space-y-3">
                       {canReviewAtLeadStage ? (
@@ -292,7 +351,7 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
                               disabled={transitionMutation.isPending}
                               className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-bold transition-colors disabled:opacity-50"
                             >
-                              Approve to Manager
+                              Approve to Partner
                             </button>
                             <button
                               onClick={() => handleWorkflowAction('return')}
@@ -309,49 +368,6 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
                     </div>
                   )}
 
-                  {/* Manager Stage */}
-                  {false && task.current_stage === 'manager' && (
-                    <div className="space-y-3">
-                      {canReviewAtManagerStage ? (
-                        <>
-                          <textarea
-                            rows={2}
-                            value={workflowComment}
-                            onChange={(e) => setWorkflowComment(e.target.value)}
-                            placeholder="Add review feedback / comment..."
-                            className="w-full bg-white border border-[#E5E7EB] rounded-md p-2 text-xs outline-none focus:border-[#2563EB]"
-                          />
-                          <div className="grid grid-cols-3 gap-2">
-                            <button
-                              onClick={() => handleWorkflowAction('approve')}
-                              disabled={transitionMutation.isPending}
-                              className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-bold transition-colors disabled:opacity-50"
-                            >
-                              Approve to Partner
-                            </button>
-                            <button
-                              onClick={() => handleWorkflowAction('request_changes')}
-                              disabled={transitionMutation.isPending}
-                              className="h-8 bg-amber-500 hover:bg-amber-600 text-white rounded-md text-xs font-bold transition-colors disabled:opacity-50"
-                            >
-                              Request Changes
-                            </button>
-                            <button
-                              onClick={() => handleWorkflowAction('reject')}
-                              disabled={transitionMutation.isPending}
-                              className="h-8 bg-rose-600 hover:bg-rose-700 text-white rounded-md text-xs font-bold transition-colors disabled:opacity-50"
-                            >
-                              Reject
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <p className="text-xs text-slate-500 italic">Waiting for Manager review. You do not have permissions to review at this stage.</p>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Partner Stage */}
                   {task.status === 'approved' && (
                     <div className="space-y-3">
                       {canCloseApprovedWork ? (
@@ -381,7 +397,6 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
                 </div>
               )}
 
-              {/* Completion Log */}
               {task.status === 'closed' && (
                 <div className="bg-[#F0FDF4] border border-[#22C55E]/20 rounded-lg p-4 space-y-2 text-xs leading-relaxed text-[#64748B]">
                   <span className="font-bold text-[#0F172A] block">Completion Record</span>
@@ -394,11 +409,9 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
                 </div>
               )}
 
-              {/* Discussion & Comments */}
               <div className="space-y-3">
                 <span className="block text-xs font-bold text-[#64748B] uppercase tracking-wide">Discussion & Comments</span>
                 
-                {/* Comments list */}
                 {task.comments && task.comments.length > 0 ? (
                   <div className="space-y-2">
                     {task.comments.map((comment) => (
@@ -417,7 +430,6 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
                   <p className="text-xs text-[#64748B] italic text-center py-2 bg-slate-50 border border-dashed border-slate-200 rounded-lg">No comments yet. Start the discussion below!</p>
                 )}
 
-                {/* Add Comment Box */}
                 <div className="flex gap-2 pt-1">
                   <input
                     type="text"
@@ -439,7 +451,6 @@ const TaskDetail = ({ taskId, isOpen, onClose }) => {
                 </div>
               </div>
 
-              {/* Audit Trail */}
               <div className="space-y-3">
                 <span className="block text-xs font-bold text-[#64748B] uppercase tracking-wide">Audit Trail</span>
                 {task.audit_logs && task.audit_logs.length > 0 ? (

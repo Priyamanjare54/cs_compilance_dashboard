@@ -342,6 +342,21 @@ const ClientList = () => {
                 <p className="text-[10px] text-[#64748B]">Optional. Used to infer the right team assignment if left blank.</p>
               </div>
 
+              <div className="grid grid-cols-3 gap-2">
+                <div className="space-y-1.5">
+                  <label className={labelCls}>Paid-up Capital</label>
+                  <input type="number" step="any" name="paid_up_capital" placeholder="e.g. 1000000" value={formData.paid_up_capital} onChange={handleInputChange} className={inputCls} />
+                </div>
+                <div className="space-y-1.5">
+                  <label className={labelCls}>Annual Turnover</label>
+                  <input type="number" step="any" name="annual_turnover" placeholder="e.g. 5000000" value={formData.annual_turnover} onChange={handleInputChange} className={inputCls} />
+                </div>
+                <div className="space-y-1.5">
+                  <label className={labelCls}>Bank Loan Amount</label>
+                  <input type="number" step="any" name="bank_loan_amount" placeholder="e.g. 2000000" value={formData.bank_loan_amount} onChange={handleInputChange} className={inputCls} />
+                </div>
+              </div>
+
               <div className="space-y-1.5">
                 <label className={labelCls}>Registration/Inception Date</label>
                 <input type="date" name="reg_date" required value={formData.reg_date} onChange={handleInputChange} className={inputCls} />

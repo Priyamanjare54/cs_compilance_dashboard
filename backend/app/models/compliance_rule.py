@@ -8,6 +8,9 @@ class ComplianceRule(Document):
     organization_id: uuid.UUID | None = None  # None means platform/global rule
     form_number: str | None = None
     company_types: list[str]
+    min_paid_up_capital: float | None = None
+    min_annual_turnover: float | None = None
+    min_bank_loan_amount: float | None = None
     frequency: str
     due_days_from_trigger: int
     category: str = "cs"  # cs, ca

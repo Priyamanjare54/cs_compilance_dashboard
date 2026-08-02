@@ -38,6 +38,14 @@ async def run_rule_engine_for_company(db, company: Company, user_id: Optional[uu
     
     for rule in rules:
         if company.company_type in rule.company_types:
+            # Check financial thresholds (null threshold = no restriction; rule applies regardless)
+            if rule.min_paid_up_capital is not None and (company.paid_up_capital is None or company.paid_up_capital < rule.min_paid_up_capital):
+                continue
+            if rule.min_annual_turnover is not None and (company.annual_turnover is None or company.annual_turnover < rule.min_annual_turnover):
+                continue
+            if rule.min_bank_loan_amount is not None and (company.bank_loan_amount is None or company.bank_loan_amount < rule.min_bank_loan_amount):
+                continue
+
             due_date = company.financial_year_end + timedelta(days=rule.due_days_from_trigger)
             
             title = f"{rule.name} ({rule.form_number})" if rule.form_number else rule.name

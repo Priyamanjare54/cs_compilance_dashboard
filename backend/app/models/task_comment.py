@@ -10,6 +10,7 @@ class TaskComment(Document):
     user_id: uuid.UUID
     user_name: str
     content: str
+    is_remark: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     class Settings:

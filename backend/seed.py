@@ -282,6 +282,9 @@ async def seed():
             reg_date=date(2015, 6, 12),
             financial_year_end=date(2026, 3, 31),
             address="102, Connaught Place, New Delhi - 110001",
+            paid_up_capital=1500000.0,
+            annual_turnover=5000000.0,
+            bank_loan_amount=500000.0,
             assigned_to=staff1.id,
             client_type="cs",
             organization_id=default_org.id

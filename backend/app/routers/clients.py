@@ -170,13 +170,9 @@ async def get_company_360_view(
         user = users_by_id.get(user_id) if user_id else None
         return UserMinResponse(id=user.id, email=user.email, full_name=user.full_name, role=user.role) if user else None
 
-    counts = {"overdue": 0, "due_soon": 0, "upcoming": 0, "completed": 0, "total": 0}
     response_tasks = []
     documents = []
     for task in tasks:
-        if task.status in counts:
-            counts[task.status] += 1
-            counts["total"] += 1
         response_tasks.append(Company360Task(
             id=task.id, title=task.title, due_date=task.due_date, status=task.status,
             category=task.category, display_category=_display_category(task), priority=_priority(task),
@@ -206,6 +202,16 @@ async def get_company_360_view(
     ) for log in logs]
 
     calendar_items = await ComplianceCalendar.find({"organization_id": current_user.organization_id, "client_id": company.id}).sort("due_date").to_list()
+    counts = {"overdue": 0, "due_soon": 0, "upcoming": 0, "completed": 0, "total": 0}
+    for item in calendar_items:
+        if item.status == "overdue":
+            counts["overdue"] += 1
+        elif item.status == "scheduled":
+            counts["upcoming"] += 1
+        elif item.status == "completed":
+            counts["completed"] += 1
+        counts["total"] += 1
+
     calendar_response = []
     for item in calendar_items:
         rule = await ComplianceRule.get(item.compliance_rule_id)

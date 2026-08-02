@@ -12,6 +12,9 @@ class Company(Document):
     reg_date: date
     financial_year_end: date
     address: str | None = None
+    paid_up_capital: float | None = None
+    annual_turnover: float | None = None
+    bank_loan_amount: float | None = None
     assigned_to: uuid.UUID | None = None
     relationship_partner_id: uuid.UUID | None = None
     manager_id: uuid.UUID | None = None

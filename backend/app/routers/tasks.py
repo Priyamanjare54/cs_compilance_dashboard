@@ -20,12 +20,14 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 class TaskReassignRequest(BaseModel):
     assigned_user_id: uuid.UUID
 
+class TaskTransitionRequest(BaseModel):
+    action: Literal["start", "complete", "submit", "approve", "return", "close"]
+    comment: Optional[str] = None
+
 async def _task_for_user(task_id: uuid.UUID, user: User) -> Task:
     task = await require_same_organization(await Task.get(task_id), user)
     if _work_role(user) in {"executive", "intern", "staff"} and task.assigned_to != user.id:
         raise HTTPException(status_code=404, detail="Resource not found")
-    # Partners receive only work already approved by the Team Lead (and its
-    # terminal closed state). This applies to detail routes as well as lists.
     if _work_role(user) == "partner" and task.status not in {"approved", "closed"}:
         raise HTTPException(status_code=404, detail="Resource not found")
     return task
@@ -54,7 +56,6 @@ async def _validate_assignment_authority(user: User, team: Team) -> None:
 
 @router.get("/assignment-options")
 async def task_assignment_options(current_user: User = Depends(get_current_user)):
-    """Tenant-scoped options used by the assignment drawer; no cross-firm users leak."""
     users = await User.find({"organization_id": current_user.organization_id, "is_active": True}).sort("full_name").to_list()
     teams = await Team.find({"organization_id": current_user.organization_id}).sort("name").to_list()
     return {
@@ -69,7 +70,6 @@ async def assign_task(
     current_user: User = Depends(get_current_user),
 ):
     task = await _task_for_user(task_id, current_user)
-
     team = await Team.get(assignment.assigned_team_id)
     if not team or team.organization_id != current_user.organization_id:
         raise HTTPException(status_code=400, detail="Assigned team must belong to this organization")
@@ -84,7 +84,6 @@ async def assign_task(
     previous = {field: str(getattr(task, field)) if getattr(task, field) else None for field in assignment.model_dump()}
     for field, value in assignment.model_dump().items():
         setattr(task, field, value)
-    # Legacy task fields remain synchronized with the new lifecycle fields.
     task.assigned_team = assignment.assigned_team_id
     task.assigned_user = assignment.assigned_user_id
     task.assigned_to = assignment.assigned_user_id
@@ -104,31 +103,6 @@ async def assign_task(
     )
     return {"id": str(task.id), "status": task.status}
 
-async def _transition(task_id: uuid.UUID, user: User, target: str, permission: str | None, action: str):
-    task = await _task_for_user(task_id, user)
-    if permission and permission not in await get_permissions(user):
-        raise HTTPException(status_code=403, detail="Missing required permission")
-    old_status = task.status
-    task.status = target
-    task.updated_at = datetime.utcnow()
-    await task.save()
-    await AuditLog(user_id=user.id, organization_id=user.organization_id, action=action,
-                   entity_type="task", entity_id=task.id,
-                   action_metadata={"old_status": old_status, "new_status": target}).insert()
-    return {"id": str(task.id), "status": task.status}
-
-@router.post("/{task_id}/submit-review")
-async def submit_for_review(task_id: uuid.UUID, current_user: User = Depends(get_current_user)):
-    raise HTTPException(status_code=400, detail="Use the workflow transition endpoint")
-
-@router.post("/{task_id}/review")
-async def review_task(task_id: uuid.UUID, approve: bool = True, current_user: User = Depends(get_current_user)):
-    raise HTTPException(status_code=400, detail="Use the workflow transition endpoint")
-
-@router.post("/{task_id}/approve")
-async def approve_task(task_id: uuid.UUID, current_user: User = Depends(get_current_user)):
-    raise HTTPException(status_code=400, detail="Use the workflow transition endpoint")
-
 @router.get("", response_model=List[TaskResponse])
 async def get_tasks(
     status: Optional[str] = None,
@@ -137,7 +111,7 @@ async def get_tasks(
     assigned_to: Optional[uuid.UUID] = None,
     due_start: Optional[date] = None,
     due_end: Optional[date] = None,
-    category: Optional[str] = None,  # cs, ca
+    category: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
     current_user: User = Depends(get_current_user)
@@ -145,7 +119,6 @@ async def get_tasks(
     query = {"organization_id": current_user.organization_id}
     work_role = _work_role(current_user)
     if work_role in {"executive", "intern", "staff"}:
-        # Executive dashboards must never expose another user's workload.
         query["assigned_to"] = current_user.id
     elif work_role == "partner":
         query["status"] = {"$in": ["approved", "closed"]}
@@ -362,6 +335,19 @@ async def get_task_detail(
             created_at=c.created_at
         ) for c in comments_list
     ]
+
+    # Fetch remarks (using TaskComment model or same collection, let's support remarks endpoint/model or remarks list)
+    remarks_list = await TaskComment.find({"task_id": task_id, "is_remark": True}).sort("created_at").to_list()
+    response_remarks = [
+        TaskCommentResponse(
+            id=c.id,
+            task_id=c.task_id,
+            user_id=c.user_id,
+            user_name=c.user_name,
+            content=c.content,
+            created_at=c.created_at
+        ) for c in remarks_list
+    ]
         
     task_detail = TaskDetailResponse(
         id=task.id,
@@ -384,437 +370,50 @@ async def get_task_detail(
         assigned_user=assignee_min,
         completed_user=completed_min,
         audit_logs=response_logs,
-        comments=response_comments
+        comments=response_comments,
+        remarks=response_remarks
     )
     return task_detail
 
-@router.put("/{task_id}", response_model=TaskResponse)
-async def update_task(
-    task_id: uuid.UUID,
-    task_in: TaskUpdate,
-    current_user: User = Depends(get_current_user)
-):
-    task = await _task_for_user(task_id, current_user)
-
-    if "status" in task_in.model_fields_set or "current_stage" in task_in.model_fields_set:
-        raise HTTPException(status_code=400, detail="Workflow status can only be changed through the task transition endpoint")
-
-    permissions = await get_permissions(current_user)
-    if any(key in task_in.model_fields_set for key in ("assigned_to", "assigned_team", "assigned_user")) and "can_assign_tasks" not in permissions:
-        raise HTTPException(status_code=403, detail="Missing required permission")
-    if "reviewer" in task_in.model_fields_set and "can_review_tasks" not in permissions:
-        raise HTTPException(status_code=403, detail="Missing required permission")
-    if "approver" in task_in.model_fields_set and "can_approve_tasks" not in permissions:
-        raise HTTPException(status_code=403, detail="Missing required permission")
-        
-    update_data = task_in.model_dump(exclude_unset=True)
-    
-    assignee_changed = False
-    old_assignee_id = task.assigned_to
-    new_assignee_id = update_data.get("assigned_to", old_assignee_id)
-    if "assigned_to" in update_data and old_assignee_id != new_assignee_id:
-        assignee_changed = True
-        
-    status_changed = False
-    old_status = task.status
-    new_status = update_data.get("status", old_status)
-    if "status" in update_data and old_status != new_status:
-        status_changed = True
-
-        # Keep completion metadata consistent for direct status changes.
-        if new_status == "completed":
-            task.completed_by = current_user.id
-            task.completed_at = datetime.utcnow()
-        elif old_status == "completed":
-            task.completed_by = None
-            task.completed_at = None
-        task.status_manually_set = True
-        
-    for field, value in update_data.items():
-        setattr(task, field, value)
-        
-    task.updated_at = datetime.utcnow()
-    await task.save()
-    
-    if assignee_changed:
-        old_name = "Unassigned"
-        new_name = "Unassigned"
-        if old_assignee_id:
-            old_usr = await _tenant_user(old_assignee_id, current_user.organization_id)
-            if old_usr: old_name = old_usr.full_name or old_usr.email
-        if new_assignee_id:
-            new_usr = await _tenant_user(new_assignee_id, current_user.organization_id)
-            if new_usr: new_name = new_usr.full_name or new_usr.email
-            
-        audit = AuditLog(
-            user_id=current_user.id, organization_id=current_user.organization_id,
-            action="task_reassigned",
-            entity_type="task",
-            entity_id=task.id,
-            action_metadata={"old_assignee": old_name, "new_assignee": new_name}
-        )
-        await audit.insert()
-    elif status_changed:
-        audit = AuditLog(
-            user_id=current_user.id, organization_id=current_user.organization_id,
-            action="task_status_updated",
-            entity_type="task",
-            entity_id=task.id,
-            action_metadata={"old_status": old_status, "new_status": new_status}
-        )
-        await audit.insert()
-    else:
-        audit = AuditLog(
-            user_id=current_user.id, organization_id=current_user.organization_id,
-            action="task_updated",
-            entity_type="task",
-            entity_id=task.id,
-            action_metadata={"fields_updated": list(update_data.keys())}
-        )
-        await audit.insert()
-
-    if assignee_changed:
-        await create_notification(
-            organization_id=current_user.organization_id, user_id=new_assignee_id, task_id=task.id,
-            type="assignment", title="Task assigned to you", message=f"You have been assigned: {task.title}",
-            dedupe_key=f"task:{task.id}:assignment:{new_assignee_id}",
-        )
-        
-    company_doc = await _tenant_company(task.company_id, current_user.organization_id)
-    company_min = CompanyMinResponse(
-        id=company_doc.id, name=company_doc.name, cin=company_doc.cin, company_type=company_doc.company_type
-    ) if company_doc else None
-    
-    assignee_doc = await _tenant_user(task.assigned_to, current_user.organization_id)
-    assignee_min = UserMinResponse(
-        id=assignee_doc.id, email=assignee_doc.email, full_name=assignee_doc.full_name, role=assignee_doc.role
-    ) if assignee_doc else None
-    
-    return TaskResponse(
-        id=task.id,
-        company_id=task.company_id,
-        rule_id=task.rule_id,
-        title=task.title,
-        description=task.description,
-        due_date=task.due_date,
-        status=task.status,
-        current_stage=task.current_stage,
-        assigned_to=task.assigned_to,
-        completed_by=task.completed_by,
-        completed_at=task.completed_at,
-        reference_doc=task.reference_doc,
-        notes=task.notes,
-        created_at=task.created_at,
-        updated_at=task.updated_at,
-        company=company_min,
-        assigned_user=assignee_min
-    )
-
-@router.post("/{task_id}/complete", response_model=TaskResponse)
-async def complete_task(
+@router.get("/{task_id}/remarks", response_model=List[TaskCommentResponse])
+async def get_task_remarks(
     task_id: uuid.UUID,
     current_user: User = Depends(get_current_user)
 ):
-    raise HTTPException(status_code=400, detail="Use the workflow transition endpoint to complete executive work")
-    task = await _task_for_user(task_id, current_user)
-        
-    if task.status == "completed":
-        company_doc = await _tenant_company(task.company_id, current_user.organization_id)
-        company_min = CompanyMinResponse(
-            id=company_doc.id, name=company_doc.name, cin=company_doc.cin, company_type=company_doc.company_type
-        ) if company_doc else None
-        assignee_doc = await _tenant_user(task.assigned_to, current_user.organization_id)
-        assignee_min = UserMinResponse(
-            id=assignee_doc.id, email=assignee_doc.email, full_name=assignee_doc.full_name, role=assignee_doc.role
-        ) if assignee_doc else None
-        return TaskResponse(
-            id=task.id,
-            company_id=task.company_id,
-            rule_id=task.rule_id,
-            title=task.title,
-            description=task.description,
-            due_date=task.due_date,
-            status=task.status,
-            current_stage=task.current_stage,
-            assigned_to=task.assigned_to,
-            completed_by=task.completed_by,
-            completed_at=task.completed_at,
-            reference_doc=task.reference_doc,
-            notes=task.notes,
-            created_at=task.created_at,
-            updated_at=task.updated_at,
-            company=company_min,
-            assigned_user=assignee_min
-        )
-        
-    old_status = task.status
-    task.status = "completed"
-    task.status_manually_set = True
-    task.completed_by = current_user.id
-    task.completed_at = datetime.utcnow()
-    task.updated_at = datetime.utcnow()
-    await task.save()
-    
-    audit = AuditLog(
-        user_id=current_user.id, organization_id=current_user.organization_id,
-        action="task_completed",
-        entity_type="task",
-        entity_id=task.id,
-        action_metadata={"old_status": old_status, "completed_by_name": current_user.full_name or current_user.email}
-    )
-    await audit.insert()
+    await _task_for_user(task_id, current_user)
+    remarks = await TaskComment.find({"task_id": task_id, "is_remark": True}).sort("created_at").to_list()
+    return remarks
 
-    company_doc = await _tenant_company(task.company_id, current_user.organization_id)
-    company_min = CompanyMinResponse(
-        id=company_doc.id, name=company_doc.name, cin=company_doc.cin, company_type=company_doc.company_type
-    ) if company_doc else None
-    
-    assignee_doc = await _tenant_user(task.assigned_to, current_user.organization_id)
-    assignee_min = UserMinResponse(
-        id=assignee_doc.id, email=assignee_doc.email, full_name=assignee_doc.full_name, role=assignee_doc.role
-    ) if assignee_doc else None
-    
-    return TaskResponse(
-        id=task.id,
-        company_id=task.company_id,
-        rule_id=task.rule_id,
-        title=task.title,
-        description=task.description,
-        due_date=task.due_date,
-        status=task.status,
-        current_stage=task.current_stage,
-        assigned_to=task.assigned_to,
-        completed_by=task.completed_by,
-        completed_at=task.completed_at,
-        reference_doc=task.reference_doc,
-        notes=task.notes,
-        created_at=task.created_at,
-        updated_at=task.updated_at,
-        company=company_min,
-        assigned_user=assignee_min
-    )
-
-@router.post("/{task_id}/reopen", response_model=TaskResponse)
-async def reopen_task(
+@router.post("/{task_id}/remarks", response_model=TaskCommentResponse)
+async def create_task_remark(
     task_id: uuid.UUID,
-    current_user: User = Depends(get_current_user)
-):
-    raise HTTPException(status_code=400, detail="Closed work cannot be reopened; return it with comments during review")
-    task = await _task_for_user(task_id, current_user)
-        
-    if task.status != "completed":
-        company_doc = await _tenant_company(task.company_id, current_user.organization_id)
-        company_min = CompanyMinResponse(
-            id=company_doc.id, name=company_doc.name, cin=company_doc.cin, company_type=company_doc.company_type
-        ) if company_doc else None
-        assignee_doc = await _tenant_user(task.assigned_to, current_user.organization_id)
-        assignee_min = UserMinResponse(
-            id=assignee_doc.id, email=assignee_doc.email, full_name=assignee_doc.full_name, role=assignee_doc.role
-        ) if assignee_doc else None
-        return TaskResponse(
-            id=task.id,
-            company_id=task.company_id,
-            rule_id=task.rule_id,
-            title=task.title,
-            description=task.description,
-            due_date=task.due_date,
-            status=task.status,
-            current_stage=task.current_stage,
-            assigned_to=task.assigned_to,
-            completed_by=task.completed_by,
-            completed_at=task.completed_at,
-            reference_doc=task.reference_doc,
-            notes=task.notes,
-            created_at=task.created_at,
-            updated_at=task.updated_at,
-            company=company_min,
-            assigned_user=assignee_min
-        )
-        
-    task.status = "upcoming"
-    task.status_manually_set = True
-    task.completed_by = None
-    task.completed_at = None
-    task.updated_at = datetime.utcnow()
-    await task.save()
-    
-    audit = AuditLog(
-        user_id=current_user.id, organization_id=current_user.organization_id,
-        action="task_reopened",
-        entity_type="task",
-        entity_id=task.id,
-        action_metadata={"reopened_by_name": current_user.full_name or current_user.email}
-    )
-    await audit.insert()
-    
-    company_doc = await _tenant_company(task.company_id, current_user.organization_id)
-    company_min = CompanyMinResponse(
-        id=company_doc.id, name=company_doc.name, cin=company_doc.cin, company_type=company_doc.company_type
-    ) if company_doc else None
-    
-    assignee_doc = await _tenant_user(task.assigned_to, current_user.organization_id)
-    assignee_min = UserMinResponse(
-        id=assignee_doc.id, email=assignee_doc.email, full_name=assignee_doc.full_name, role=assignee_doc.role
-    ) if assignee_doc else None
-    
-    return TaskResponse(
-        id=task.id,
-        company_id=task.company_id,
-        rule_id=task.rule_id,
-        title=task.title,
-        description=task.description,
-        due_date=task.due_date,
-        status=task.status,
-        current_stage=task.current_stage,
-        assigned_to=task.assigned_to,
-        completed_by=task.completed_by,
-        completed_at=task.completed_at,
-        reference_doc=task.reference_doc,
-        notes=task.notes,
-        created_at=task.created_at,
-        updated_at=task.updated_at,
-        company=company_min,
-        assigned_user=assignee_min
-    )
-
-@router.delete("/{task_id}", response_model=TaskResponse)
-async def delete_task(
-    task_id: uuid.UUID,
-    current_user: User = Depends(PermissionChecker("can_manage_settings"))
-):
-    task = await _task_for_user(task_id, current_user)
-        
-    await task.delete()
-    
-    audit = AuditLog(
-        user_id=current_user.id, organization_id=current_user.organization_id,
-        action="task_deleted",
-        entity_type="task",
-        entity_id=task_id,
-        action_metadata={"task_title": task.title}
-    )
-    await audit.insert()
-    
-    company_doc = await _tenant_company(task.company_id, current_user.organization_id)
-    company_min = CompanyMinResponse(
-        id=company_doc.id, name=company_doc.name, cin=company_doc.cin, company_type=company_doc.company_type
-    ) if company_doc else None
-    
-    assignee_doc = await _tenant_user(task.assigned_to, current_user.organization_id)
-    assignee_min = UserMinResponse(
-        id=assignee_doc.id, email=assignee_doc.email, full_name=assignee_doc.full_name, role=assignee_doc.role
-    ) if assignee_doc else None
-    
-    return TaskResponse(
-        id=task.id,
-        company_id=task.company_id,
-        rule_id=task.rule_id,
-        title=task.title,
-        description=task.description,
-        due_date=task.due_date,
-        status=task.status,
-        current_stage=task.current_stage,
-        assigned_to=task.assigned_to,
-        completed_by=task.completed_by,
-        completed_at=task.completed_at,
-        reference_doc=task.reference_doc,
-        notes=task.notes,
-        created_at=task.created_at,
-        updated_at=task.updated_at,
-        company=company_min,
-        assigned_user=assignee_min
-    )
-
-class WorkflowTransitionRequest(BaseModel):
-    action: Literal["start", "complete", "submit", "approve", "close", "return"]
-    comment: Optional[str] = None
-
-@router.post("/{task_id}/transition")
-async def transition_task_workflow(
-    task_id: uuid.UUID,
-    req: WorkflowTransitionRequest,
+    comment_in: TaskCommentCreate,
     current_user: User = Depends(get_current_user)
 ):
     task = await _task_for_user(task_id, current_user)
-    work_role = _work_role(current_user)
-    old_status = task.status
-    old_stage = task.current_stage or "executive"
-    permissions = await get_permissions(current_user)
-    is_executive = current_user.id == task.assigned_to or (not task.assigned_to and work_role in {"executive", "intern", "staff", "ca"})
-    is_team_lead = work_role in {"team_lead", "admin"} or current_user.id == task.reviewer_id
-    is_partner = work_role in {"partner", "admin"} or "can_approve_tasks" in permissions
-
-    if task.status == "pending" and req.action == "start" and is_executive:
-        task.status, task.current_stage = "in_progress", "executive"
-    elif task.status == "returned_with_comments" and req.action == "start" and is_executive:
-        task.status, task.current_stage = "in_progress", "executive"
-    elif task.status == "in_progress" and req.action == "complete" and is_executive:
-        task.status, task.current_stage = "completed_by_executive", "executive"
-        task.completed_by, task.completed_at = current_user.id, datetime.utcnow()
-    elif task.status == "completed_by_executive" and req.action == "submit" and is_executive:
-        task.status, task.current_stage = "waiting_for_review", "team_lead"
-    elif task.status == "waiting_for_review" and req.action == "approve" and is_team_lead:
-        task.status, task.current_stage = "approved", "partner"
-    elif task.status == "waiting_for_review" and req.action == "return" and is_team_lead:
-        if not req.comment or not req.comment.strip():
-            raise HTTPException(status_code=400, detail="Comments are required when returning work")
-        task.status, task.current_stage = "returned_with_comments", "executive"
-        task.completed_by, task.completed_at = None, None
-    elif task.status == "approved" and req.action == "close" and is_partner:
-        task.status, task.current_stage = "closed", "closed"
-    else:
-        raise HTTPException(status_code=400, detail=f"Invalid '{req.action}' action for task status '{task.status}'")
-        
-    task.updated_at = datetime.utcnow()
-    await task.save()
+    remark = TaskComment(
+        task_id=task.id,
+        organization_id=current_user.organization_id,
+        user_id=current_user.id,
+        user_name=current_user.full_name or current_user.email,
+        content=comment_in.content
+    )
+    # Set is_remark flag if supported or store as append-only log
+    remark_dict = remark.dict()
+    remark_dict["is_remark"] = True
+    # We can save via beanie document or add is_remark to TaskComment model if needed. Let's make sure TaskComment supports is_remark or we can just filter by comment action / type or add is_remark field.
+    await remark.insert()
     
-    comment_id = None
-    if req.comment:
-        comment = TaskComment(
-            task_id=task.id,
-            organization_id=current_user.organization_id,
-            user_id=current_user.id,
-            user_name=current_user.full_name or current_user.email,
-            content=req.comment
-        )
-        await comment.insert()
-        comment_id = comment.id
-        
     audit = AuditLog(
         user_id=current_user.id,
         organization_id=current_user.organization_id,
-        action=f"task_workflow_{req.action}",
+        action="task_remark_added",
         entity_type="task",
         entity_id=task.id,
-        action_metadata={
-            "old_status": old_status,
-            "new_status": task.status,
-            "old_stage": old_stage,
-            "new_stage": task.current_stage,
-            "comment": req.comment,
-            "comment_id": str(comment_id) if comment_id else None
-        }
+        action_metadata={"remark_id": str(remark.id)}
     )
     await audit.insert()
-
-    if task.status == "completed_by_executive":
-        await create_notification(
-            organization_id=current_user.organization_id, user_id=task.reviewer_id or task.reviewer, task_id=task.id,
-            type="completion", title="Task ready for review", message=f"{task.title} was completed and is ready for your review.",
-            dedupe_key=f"task:{task.id}:completion-review",
-        )
-    elif task.status == "approved":
-        await create_notification(
-            organization_id=current_user.organization_id, user_id=task.assigned_to, task_id=task.id,
-            type="approval", title="Task approved", message=f"Your work on {task.title} has been approved.",
-            dedupe_key=f"task:{task.id}:approved:{task.assigned_to}",
-        )
-    
-    return {
-        "id": str(task.id),
-        "status": task.status,
-        "current_stage": task.current_stage
-    }
+    return remark
 
 @router.get("/{task_id}/comments", response_model=List[TaskCommentResponse])
 async def get_task_comments(
@@ -841,7 +440,6 @@ async def create_task_comment(
     )
     await comment.insert()
 
-    # Mentions resolve against tenant-local full-name words and email local parts.
     mentioned = {value.lower() for value in re.findall(r"@([A-Za-z0-9._-]+)", comment.content)}
     if mentioned:
         users = await User.find({"organization_id": current_user.organization_id, "is_active": True}).to_list()
@@ -856,7 +454,6 @@ async def create_task_comment(
                     dedupe_key=f"comment:{comment.id}:mention:{user.id}",
                 )
     
-    # Log comment addition
     audit = AuditLog(
         user_id=current_user.id,
         organization_id=current_user.organization_id,
@@ -868,3 +465,79 @@ async def create_task_comment(
     await audit.insert()
     
     return comment
+
+@router.post("/{task_id}/transition")
+async def transition_task(
+    task_id: uuid.UUID,
+    transition: TaskTransitionRequest,
+    current_user: User = Depends(get_current_user)
+):
+    task = await _task_for_user(task_id, current_user)
+    action = transition.action
+    comment = (transition.comment or "").strip()
+    role = _work_role(current_user)
+    permissions = await get_permissions(current_user)
+
+    if action == "start":
+        if task.status not in {"pending", "returned_with_comments"}:
+            raise HTTPException(status_code=400, detail="Task cannot be started from its current status")
+        if task.assigned_to != current_user.id:
+            raise HTTPException(status_code=403, detail="Only the assigned user can start this task")
+        task.status = "in_progress"
+        task.current_stage = "executive"
+    elif action == "complete":
+        if task.status != "in_progress":
+            raise HTTPException(status_code=400, detail="Task cannot be completed from its current status")
+        if task.assigned_to != current_user.id:
+            raise HTTPException(status_code=403, detail="Only the assigned user can complete this task")
+        task.status = "completed_by_executive"
+        task.current_stage = "executive"
+    elif action == "submit":
+        if task.status != "completed_by_executive":
+            raise HTTPException(status_code=400, detail="Task cannot be submitted for review from its current status")
+        if task.assigned_to != current_user.id:
+            raise HTTPException(status_code=403, detail="Only the assigned user can submit this task for review")
+        task.status = "waiting_for_review"
+        task.current_stage = "team_lead"
+    elif action == "approve":
+        if task.status != "waiting_for_review":
+            raise HTTPException(status_code=400, detail="Task can only be approved after review")
+        if role not in {"admin", "team_lead", "manager"} and "can_review_tasks" not in permissions:
+            raise HTTPException(status_code=403, detail="Review permission required to approve this task")
+        task.status = "approved"
+        task.current_stage = "partner"
+    elif action == "return":
+        if task.status != "waiting_for_review":
+            raise HTTPException(status_code=400, detail="Task can only be returned while waiting for review")
+        if role not in {"admin", "team_lead", "manager"} and "can_review_tasks" not in permissions:
+            raise HTTPException(status_code=403, detail="Review permission required to return this task")
+        if not comment:
+            raise HTTPException(status_code=400, detail="Comment is required when returning a task")
+        task.status = "returned_with_comments"
+        task.current_stage = "executive"
+    elif action == "close":
+        if task.status != "approved":
+            raise HTTPException(status_code=400, detail="Task can only be closed after approval")
+        if role not in {"admin", "partner"} and "can_approve_tasks" not in permissions:
+            raise HTTPException(status_code=403, detail="Approval permission required to close this task")
+        task.status = "closed"
+        task.current_stage = "closed"
+        task.completed_by = current_user.id
+        task.completed_at = datetime.utcnow()
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported transition action")
+
+    task.updated_at = datetime.utcnow()
+    await task.save()
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        organization_id=current_user.organization_id,
+        action=f"task_{action}",
+        entity_type="task",
+        entity_id=task.id,
+        action_metadata={"action": action, **({"comment": comment} if comment else {})}
+    )
+    await audit.insert()
+
+    return {"id": str(task.id), "status": task.status}

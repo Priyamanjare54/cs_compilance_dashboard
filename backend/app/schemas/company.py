@@ -23,6 +23,9 @@ class CompanyBase(BaseModel):
     client_type: str = "cs"  # cs, ca, both
 
 class CompanyCreate(CompanyBase):
+    paid_up_capital: Optional[float] = None
+    annual_turnover: Optional[float] = None
+    bank_loan_amount: Optional[float] = None
     relationship_partner_id: Optional[uuid.UUID] = None
     manager_id: Optional[uuid.UUID] = None
     assigned_team_id: Optional[uuid.UUID] = None
@@ -32,6 +35,9 @@ class CompanyCreate(CompanyBase):
 
 class CompanyUpdate(BaseModel):
     cin: Optional[str] = Field(None, min_length=21, max_length=21)
+    paid_up_capital: Optional[float] = None
+    annual_turnover: Optional[float] = None
+    bank_loan_amount: Optional[float] = None
     name: Optional[str] = None
     company_type: Optional[str] = None
     reg_date: Optional[date] = None
@@ -58,6 +64,9 @@ class CompanyResponse(BaseModel):
     reg_date: date
     financial_year_end: date
     address: Optional[str] = None
+    paid_up_capital: Optional[float] = None
+    annual_turnover: Optional[float] = None
+    bank_loan_amount: Optional[float] = None
     assigned_to: Optional[uuid.UUID] = None
     relationship_partner_id: Optional[uuid.UUID] = None
     manager_id: Optional[uuid.UUID] = None

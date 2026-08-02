@@ -137,6 +137,7 @@ class TaskDetailResponse(TaskResponse):
     completed_user: Optional[UserMinResponse] = None
     audit_logs: List[AuditLogMinResponse] = []
     comments: List[TaskCommentResponse] = []
+    remarks: List[TaskCommentResponse] = []
 
     class Config:
         from_attributes = True
