@@ -7,6 +7,8 @@ from app.models.team import Team
 from app.models.compliance_rule import ComplianceRule
 from app.models.company import Company
 from app.models.organization import Organization
+from app.models.task import Task
+from app.models.compliance_calendar import ComplianceCalendar
 from app.services.rule_engine import run_rule_engine_for_company
 
 async def seed():
@@ -379,3 +381,19 @@ async def seed():
 
 if __name__ == "__main__":
     asyncio.run(seed())
+
+
+async def reset_company_data():
+    """Delete only company-related collections: Company, Task, ComplianceCalendar.
+    Does not touch User, Organization, Team, or ComplianceRule collections.
+    """
+    print("Initializing database connection for company reset...")
+    await init_db()
+
+    company_res = await Company.get_pymongo_collection().delete_many({})
+    task_res = await Task.get_pymongo_collection().delete_many({})
+    cal_res = await ComplianceCalendar.get_pymongo_collection().delete_many({})
+
+    print(f"Deleted {company_res.deleted_count} documents from companies collection")
+    print(f"Deleted {task_res.deleted_count} documents from tasks collection")
+    print(f"Deleted {cal_res.deleted_count} documents from compliance_calendar collection")
