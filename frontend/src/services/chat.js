@@ -19,3 +19,12 @@ export const checkChatHealth = async () => {
     throw new Error('Chat service is unavailable');
   }
 };
+
+export const draftClientEmail = async (draftRequest) => {
+  try {
+    const response = await api.post('/assistant/email-draft', draftRequest);
+    return response.data;
+  } catch (error) {
+    throw new Error(error.response?.data?.detail || 'Failed to draft the client email');
+  }
+};

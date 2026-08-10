@@ -12,9 +12,9 @@ The default application runs as two services plus MongoDB. The compliance assist
 |---|---|---|---|
 | **Backend API** | FastAPI, Beanie ODM, Motor, APScheduler | `8000` | Core compliance tracking, client management, scheduling |
 | **Frontend** | React, Vite, Tailwind CSS, TanStack Query | `5173` | Dashboard UI |
-| **Compliance Assistant** | Integrated FastAPI search | `8000` | Source-backed answers across the regulatory library |
+| **Compliance Assistant** | Integrated FastAPI + Gemini | `8000` | Source-backed answers and review-first client email drafts |
 
-Database: **MongoDB**. The default assistant does not require a separate service, vector database, or external API key.
+Database: **MongoDB**. The assistant does not require a separate service or vector database. Generated answers and client email drafts require a Gemini API key in `backend/.env`.
 
 The built-in Regulatory Intelligence library automatically discovers compatible `*_scraped_data.json` and `*_scrapped_data.json` files in `backend/`. It currently indexes 5,116 deduplicated records from 11 sources: IBBI, ICSI, IP India, India Registration Online, MCA, Ministry of Labour & Employment, NSE, RBI, SEBI, Udyam, and Vayana.
 
@@ -22,12 +22,10 @@ The built-in Regulatory Intelligence library automatically discovers compatible 
 
 ## Prerequisites
 
-> The Gemini key mentioned below is only for the optional legacy experiment in `ai_module/`; it is not required for the dashboard or its integrated Assistant.
-
 - Python 3.11+
 - Node.js 20+
 - MongoDB Community Server, running locally on port `27017`
-- A Gemini API key for the AI module — [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+- A Gemini API key for generated assistant answers and email drafts — [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
 
 ---
 
@@ -54,6 +52,8 @@ cd backend
 python -m venv venv
 source venv/bin/activate        # Windows: .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+copy .env.example .env          # Windows; use cp on macOS/Linux
+# Set GEMINI_API_KEY in .env
 python seed.py                  # initializes MongoDB collections
 uvicorn app.main:app --reload --port 8000
 \`\`\`
