@@ -1,15 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+import logging
 from typing import Literal, Optional
 import uuid
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 from app.core.dependencies import get_current_user, require_same_organization
 from app.models.company import Company
 from app.models.user import User
-from app.services.regulatory_library import load_regulatory_updates
-from app.services.assistant_search import find_relevant_records
 from app.services.assistant_generation import generate_answer, generate_email_draft
+from app.services.assistant_search import find_relevant_records
+from app.services.regulatory_library import load_regulatory_updates
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/assistant", tags=["compliance assistant"])
 
@@ -69,9 +72,9 @@ async def assistant_health(current_user: User = Depends(get_current_user)):
 async def assistant_chat(
     request: AssistantRequest,
     category: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
-    matches = find_relevant_records(request.question)
+    matches = find_relevant_records(request.question, category=category)
     
     if not matches:
         return {
@@ -83,7 +86,8 @@ async def assistant_chat(
     context_records = matches[:MAX_CONTEXT_RECORDS]
     try:
         answer = await generate_answer(request.question, context_records)
-    except Exception:
+    except Exception as exc:
+        logger.exception("Failed to generate regulatory answer: %s", exc)
         return {
             "answer": "I found relevant publications but could not generate a response right now. Please try again shortly.",
             "sources": [],
@@ -126,7 +130,8 @@ async def assistant_email_draft(
             recipient_name=request.recipient_name,
             records=records,
         )
-    except Exception:
+    except Exception as exc:
+        logger.exception("Failed to generate email draft: %s", exc)
         raise HTTPException(
             status_code=503,
             detail="The email drafting assistant is unavailable. Check the Gemini configuration and try again.",

@@ -13,10 +13,19 @@ const EmailDraftPanel = ({ workspaceMode, isCS }) => {
   const [recipientName, setRecipientName] = useState('');
   const [tone, setTone] = useState('professional');
   const [prompt, setPrompt] = useState('');
-  const [draft, setDraft] = useState(null);
+  
+  // Editable draft states
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [hasDraft, setHasDraft] = useState(false);
+
   const generateDraft = useMutation({
     mutationFn: draftClientEmail,
-    onSuccess: (result) => setDraft(result),
+    onSuccess: (result) => {
+      setSubject(result.subject);
+      setBody(result.body);
+      setHasDraft(true);
+    },
     onError: (error) => toast.error(error.message),
   });
 
@@ -33,11 +42,12 @@ const EmailDraftPanel = ({ workspaceMode, isCS }) => {
   };
 
   const copyDraft = async () => {
-    await navigator.clipboard.writeText(`Subject: ${draft.subject}\n\n${draft.body}`);
-    toast.success('Email draft copied');
+    await navigator.clipboard.writeText(`Subject: ${subject}\n\n${body}`);
+    toast.success('Email draft copied to clipboard');
   };
 
   const inputClass = 'w-full rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-3 text-xs text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-50';
+
   return (
     <section className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
       <form onSubmit={handleSubmit} className="premium-card p-5 sm:p-6">
@@ -83,17 +93,30 @@ const EmailDraftPanel = ({ workspaceMode, isCS }) => {
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 sm:px-6">
           <div>
             <p className="text-sm font-semibold text-slate-950">Draft preview</p>
-            <p className="mt-0.5 text-[10px] text-slate-500">Review and edit before sending to the client.</p>
+            <p className="mt-0.5 text-[10px] text-slate-500">Review and edit directly before sending to the client.</p>
           </div>
-          {draft && <button type="button" onClick={copyDraft} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-[10px] font-semibold text-slate-600 transition hover:bg-slate-50"><Copy className="h-3.5 w-3.5" /> Copy</button>}
+          {hasDraft && (
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={handleSubmit} disabled={generateDraft.isPending} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-[10px] font-semibold text-slate-600 transition hover:bg-slate-50">
+                <RefreshCw className={`h-3.5 w-3.5 ${generateDraft.isPending ? 'animate-spin' : ''}`} /> Regenerate
+              </button>
+              <button type="button" onClick={copyDraft} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-[10px] font-semibold text-slate-600 transition hover:bg-slate-50">
+                <Copy className="h-3.5 w-3.5" /> Copy
+              </button>
+            </div>
+          )}
         </div>
-        {draft ? (
+        {hasDraft ? (
           <div className="flex-1 bg-slate-50/50 p-5 sm:p-6">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">Subject</p>
-              <p className="mt-2 text-sm font-semibold text-slate-950">{draft.subject}</p>
-              <div className="my-5 border-t border-slate-100" />
-              <p className="whitespace-pre-wrap text-xs leading-6 text-slate-700">{draft.body}</p>
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+              <div>
+                <label className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">Subject</label>
+                <input value={subject} onChange={(e) => setSubject(e.target.value)} className="w-full text-sm font-semibold text-slate-950 border-b border-slate-200 pb-2 outline-none focus:border-blue-500" />
+              </div>
+              <div>
+                <label className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">Body</label>
+                <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={12} className="w-full text-xs leading-6 text-slate-700 outline-none resize-y border border-slate-100 rounded-lg p-3 focus:border-blue-500" />
+              </div>
             </div>
           </div>
         ) : (
@@ -114,7 +137,7 @@ const Chat = () => {
   const [status, setStatus] = useState('checking');
   const [recordCount, setRecordCount] = useState(0);
   const [assistantMode, setAssistantMode] = useState('research');
-  const { mode, isCS, isCA } = useWorkspace();
+  const { mode, isCS } = useWorkspace();
 
   const check = async () => {
     setStatus('checking');

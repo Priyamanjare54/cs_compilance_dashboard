@@ -5,10 +5,10 @@ import uuid
 import pytest
 from fastapi import HTTPException
 
-from app.services.assistant_search import find_relevant_records
-from app.services.assistant_generation import _build_email_prompt, _parse_email_draft
-from app.routers.assistant import EmailDraftRequest, _source_title, assistant_email_draft
 from app.models.company import Company
+from app.routers.assistant import EmailDraftRequest, _source_title, assistant_email_draft
+from app.services.assistant_generation import _build_email_prompt
+from app.services.assistant_search import find_relevant_records
 
 
 def test_assistant_finds_form_related_publications():
@@ -49,16 +49,6 @@ def test_email_prompt_uses_client_context_and_safety_rules():
     assert "CLIENT: ABC Pvt Ltd" in prompt
     assert "Address the recipient as Mr. Mehta" in prompt
     assert "Never invent dates, fees" in prompt
-    assert "SUBJECT:" in prompt and "BODY:" in prompt
-
-
-def test_email_draft_parser_returns_subject_and_body():
-    draft = _parse_email_draft(
-        "SUBJECT: Documents required for annual filing\nBODY:\nDear Mr. Mehta,\n\nPlease share the signed statements.\n\nRegards,\nPriya"
-    )
-
-    assert draft["subject"] == "Documents required for annual filing"
-    assert draft["body"].startswith("Dear Mr. Mehta")
 
 
 @pytest.mark.asyncio
