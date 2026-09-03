@@ -1,5 +1,5 @@
-import React, { Suspense, lazy } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import React, { Suspense, lazy, useLayoutEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './context/AuthContext';
@@ -54,12 +54,28 @@ const ManagerRoute = () => {
   return isAuthenticated && ['manager', 'partner'].includes(workRole) ? <Outlet /> : <Navigate to="/dashboard" replace />;
 };
 
+const ScrollToTop = () => {
+  const { pathname } = useLocation();
+
+  useLayoutEffect(() => {
+    if ('scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual';
+    }
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [pathname]);
+
+  return null;
+};
+
 const Layout = () => {
   return (
     <div className="min-h-screen bg-[#F7F8FA] text-[#101828]">
       <Sidebar />
       <div className="lg:pl-[236px]">
         <Navbar />
+        <ScrollToTop />
         <main className="min-h-screen px-4 pb-28 pt-20 sm:px-6 lg:px-8 lg:pb-10">
           <div className="mx-auto max-w-[1280px]">
             <Outlet />
