@@ -35,17 +35,26 @@ app = FastAPI(
 )
 
 # Configure CORS
-origins = [
-    settings.FRONTEND_URL,
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:80",
-    "http://localhost",
+configured_origins = [
+    origin.strip()
+    for origin in settings.FRONTEND_URL.split(",")
+    if origin.strip()
 ]
+origins = [
+    "https://cs-compilance-dashboard-prlo.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
+if configured_origins:
+    origins.extend(configured_origins)
+else:
+    origins = ["*"]
+
+origins = list(dict.fromkeys(origins))
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Set to * for local development flexibility
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
