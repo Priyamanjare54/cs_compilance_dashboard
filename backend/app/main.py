@@ -75,4 +75,4 @@ app.include_router(notifications.router)
 
 @app.get("/")
 async def root():
-    return {"message": "CS Compliance Dashboard API is running."}
+    return {"status": "ok", "message": "CS Compliance Dashboard API is running."}

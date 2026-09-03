@@ -1,7 +1,9 @@
 import axios from 'axios';
 
+const RAG_API_BASE_URL = (import.meta.env.VITE_RAG_API_URL || 'https://cs-compilance-dashboard.onrender.com').replace(/\/+$/, '');
+
 const ragApi = axios.create({
-  baseURL: import.meta.env.VITE_RAG_API_URL || 'http://localhost:8001',
+  baseURL: RAG_API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
