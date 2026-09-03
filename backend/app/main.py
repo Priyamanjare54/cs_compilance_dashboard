@@ -54,6 +54,7 @@ origins = list(dict.fromkeys(origins))
 
 app.add_middleware(
     CORSMiddleware,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
